@@ -204,16 +204,42 @@ class TSS(object):
 
 
 def log2_enrichment(enriched_rpm, control_rpm, pseudocount):
-    return math.log2((enriched_rpm + pseudocount) / (control_rpm + pseudocount))
+    top, bottom = enriched_rpm + pseudocount, control_rpm + pseudocount
+    if top <= 0:
+        return float("-inf")
+    if bottom <= 0:
+        return float("inf")
+    return math.log2(top / bottom)
+
+
+# Settings that reproduce the published Cappable-seq pipeline of Ettwiller
+# et al. 2016 (scripts at https://github.com/Ettwiller/TSS):
+#   bam2firstbasegtf.pl --cutoff 1.5   RRS >= 1.5, RRS rounded to 3 decimals
+#   filter_tss.pl --cutoff 0           log2(RRS_cap / RRS_control) >= 0, no
+#                                      pseudocount; a position with no control
+#                                      reads gets the RRS of one control read
+#   cluster_tss.pl --cutoff 5          bedtools merge -s -d 5 on 1-nt
+#                                      features, i.e. starts <= 6 nt apart are
+#                                      chained, the one with most reads kept
+PRESETS = {
+    "default": dict(min_rpm=1.0, min_log2fc=1.0, pseudocount=1.0,
+                    control_floor=0, rpm_decimals=None, cluster_distance=5),
+    "ettwiller2016": dict(min_rpm=1.5, min_log2fc=0.0, pseudocount=0.0,
+                          control_floor=1, rpm_decimals=3, cluster_distance=6),
+}
 
 
 def call_positions(enriched, controls, min_rpm=1.0, min_log2fc=1.0,
-                   min_replicates=1, pseudocount=1.0):
+                   min_replicates=1, pseudocount=1.0, control_floor=0,
+                   rpm_decimals=None):
     """Return candidate TSS positions before clustering.
 
     ``enriched`` is a list of signals, one per replicate; ``controls`` is a
     list of the same length (paired by replicate) or empty if the experiment
     has no non-enriched control, in which case only ``min_rpm`` applies.
+    ``control_floor`` is the minimum control read count used in the ratio
+    (Ettwiller et al. use 1), and ``rpm_decimals`` rounds RPM values before
+    they are compared with ``min_rpm`` (Ettwiller et al. use 3).
     """
     if controls and len(controls) != len(enriched):
         raise ValueError("Give one control per enriched replicate "
@@ -235,9 +261,13 @@ def call_positions(enriched, controls, min_rpm=1.0, min_log2fc=1.0,
         e_values, c_values, fcs, passed = [], [], [], 0
         for i, lib in enumerate(enriched):
             e_rpm = lib.get((seqid, strand), {}).get(pos, 0.0) * scales[i]
+            if rpm_decimals is not None:
+                e_rpm = round(e_rpm, rpm_decimals)
             if controls:
-                c_rpm = (controls[i].get((seqid, strand), {}).get(pos, 0.0)
-                         * control_scales[i])
+                c_count = controls[i].get((seqid, strand), {}).get(pos, 0.0)
+                c_rpm = max(c_count, control_floor) * control_scales[i]
+                if rpm_decimals is not None:
+                    c_rpm = round(c_rpm, rpm_decimals)
                 fc = log2_enrichment(e_rpm, c_rpm, pseudocount)
                 ok = e_rpm >= min_rpm and fc >= min_log2fc
             else:
@@ -256,7 +286,7 @@ def call_positions(enriched, controls, min_rpm=1.0, min_log2fc=1.0,
 
 
 def cluster_tss(calls, distance=5):
-    """Merge calls on the same strand closer than ``distance`` nt.
+    """Merge calls on the same strand no more than ``distance`` nt apart.
 
     Within each cluster the position with the highest enriched RPM is kept,
     as many bacterial promoters give a few adjacent start positions.
@@ -568,6 +598,117 @@ def export_annogesic(enriched, controls, outdir, signal="coverage", mate=1,
 
 
 # ---------------------------------------------------------------------------
+# Comparison with a reference TSS set
+# ---------------------------------------------------------------------------
+
+STRAND_NAMES = {"+": "+", "-": "-", "forward": "+", "reverse": "-",
+                "f": "+", "r": "-", "1": "+", "-1": "-", "+1": "+"}
+
+
+def read_sites(path, columns=None, rename=None):
+    """Read TSS positions as a set of (seqid, strand, position).
+
+    GFF/GTF files are read from columns 1, 4 and 7.  For other tables give
+    ``columns`` as 1-based (seqid, position, strand) column numbers; the
+    separator is a tab, or a comma for .csv files, and lines whose position
+    column is not a number (headers) are skipped.  ``rename`` maps sequence
+    names in the file to the names used in the other set.
+    """
+    rename = rename or {}
+    is_gff = columns is None
+    if is_gff:
+        columns = (1, 4, 7)
+    sep = "," if path.endswith((".csv", ".csv.gz")) else "\t"
+    sites = set()
+    with open_text(path) as handle:
+        for line in handle:
+            if not line.strip() or line.startswith("#"):
+                continue
+            fields = [f.strip().strip('"') for f in line.rstrip("\n").split(sep)]
+            try:
+                seqid = fields[columns[0] - 1]
+                pos = int(float(fields[columns[1] - 1]))
+                strand = STRAND_NAMES[fields[columns[2] - 1].lower()]
+            except (IndexError, ValueError, KeyError):
+                if is_gff:
+                    raise ValueError("%s: not a GFF/GTF line: %r" % (path, line))
+                continue
+            sites.add((rename.get(seqid, seqid), strand, pos))
+    return sites
+
+
+def _nearest(sorted_positions, pos):
+    """Nearest position in a sorted list, or None."""
+    i = bisect.bisect_left(sorted_positions, pos)
+    best = None
+    for j in (i - 1, i):
+        if 0 <= j < len(sorted_positions):
+            if best is None or abs(sorted_positions[j] - pos) < abs(best - pos):
+                best = sorted_positions[j]
+    return best
+
+
+def compare_sites(query, reference, windows=(0, 5, 25)):
+    """Compare two TSS sets.
+
+    For every site the nearest site of the other set on the same sequence and
+    strand is found.  Offsets are query minus reference in the direction of
+    transcription (positive: the query TSS is downstream).  Returns a summary
+    dict and per-query rows (seqid, strand, position, offset or None).
+    """
+    def index(sites):
+        by_key = defaultdict(list)
+        for seqid, strand, pos in sites:
+            by_key[(seqid, strand)].append(pos)
+        for positions in by_key.values():
+            positions.sort()
+        return by_key
+
+    ref_index, query_index = index(reference), index(query)
+
+    def offsets(sites, other_index):
+        result = []
+        for seqid, strand, pos in sorted(sites):
+            near = _nearest(other_index.get((seqid, strand), []), pos)
+            if near is None:
+                result.append((seqid, strand, pos, None))
+            else:
+                diff = pos - near
+                result.append((seqid, strand, pos, diff if strand == "+" else -diff))
+        return result
+
+    query_rows = offsets(query, ref_index)
+    ref_rows = offsets(reference, query_index)
+    summary = {"query": len(query), "reference": len(reference),
+               "shared_seqids": sorted({s for s, _, _ in query} & {s for s, _, _ in reference}),
+               "windows": []}
+    for w in windows:
+        q_hit = sum(1 for r in query_rows if r[3] is not None and abs(r[3]) <= w)
+        r_hit = sum(1 for r in ref_rows if r[3] is not None and abs(r[3]) <= w)
+        summary["windows"].append({
+            "window": w,
+            "query_matched": q_hit,
+            "reference_recovered": r_hit,
+            "precision": q_hit / float(len(query)) if query else float("nan"),
+            "recall": r_hit / float(len(reference)) if reference else float("nan"),
+        })
+    return summary, query_rows
+
+
+def format_comparison(summary):
+    lines = ["query TSS:     %d" % summary["query"],
+             "reference TSS: %d" % summary["reference"]]
+    if not summary["shared_seqids"]:
+        lines.append("WARNING: no sequence names in common; use --rename")
+    lines.append("window  query_in_ref  ref_recovered  precision  recall")
+    for w in summary["windows"]:
+        lines.append("%6d  %12d  %13d  %9.3f  %6.3f" % (
+            w["window"], w["query_matched"], w["reference_recovered"],
+            w["precision"], w["recall"]))
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
 # Command line
 # ---------------------------------------------------------------------------
 
@@ -596,18 +737,25 @@ def build_parser():
     call.add_argument("--feature-types", default="gene",
                       help="Comma-separated GFF feature types used as genes "
                            "(default: gene; CDS is a common alternative)")
-    call.add_argument("--min-rpm", type=float, default=1.0,
+    call.add_argument("--preset", choices=sorted(PRESETS), default="default",
+                      help="Starting set of thresholds; 'ettwiller2016' "
+                           "reproduces Ettwiller et al. 2016. Options given "
+                           "explicitly override the preset (default: default)")
+    call.add_argument("--min-rpm", type=float,
                       help="Minimum 5'-end reads per million in the enriched "
                            "library (default 1.0)")
-    call.add_argument("--min-log2fc", type=float, default=1.0,
+    call.add_argument("--min-log2fc", type=float,
                       help="Minimum log2(enriched/control) (default 1.0)")
-    call.add_argument("--pseudocount", type=float, default=1.0,
+    call.add_argument("--pseudocount", type=float,
                       help="RPM pseudocount for the enrichment ratio (default 1.0)")
+    call.add_argument("--control-floor", type=float,
+                      help="Minimum control read count used in the ratio "
+                           "(default 0)")
     call.add_argument("--min-replicates", type=int, default=1,
                       help="Replicates in which a position must pass (default 1)")
-    call.add_argument("--cluster-distance", type=int, default=5,
-                      help="Merge TSS on the same strand within this many nt; "
-                           "0 disables (default 5)")
+    call.add_argument("--cluster-distance", type=int,
+                      help="Merge TSS on the same strand no more than this "
+                           "many nt apart; 0 disables (default 5)")
     call.add_argument("--utr-length", type=int, default=300,
                       help="Maximum 5' UTR length for Primary/Secondary (default 300)")
     call.add_argument("--antisense-distance", type=int, default=100,
@@ -628,6 +776,22 @@ def build_parser():
     export.add_argument("--positive-reverse", action="store_true",
                         help="Write reverse-strand values as positive numbers")
     export.add_argument("--outdir", required=True)
+
+    compare = sub.add_parser(
+        "compare", help="Compare TSS calls with a reference TSS set")
+    compare.add_argument("--query", required=True,
+                         help="TSS to evaluate (GFF/GTF, e.g. <prefix>.gff)")
+    compare.add_argument("--reference", required=True,
+                         help="Reference TSS (GFF/GTF, or a table with --ref-columns)")
+    compare.add_argument("--ref-columns",
+                         help="1-based seqid,position,strand columns of a "
+                              "non-GFF reference table, e.g. 1,2,3")
+    compare.add_argument("--rename", action="append", default=[],
+                         help="OLD=NEW sequence name in the reference "
+                              "(can be repeated)")
+    compare.add_argument("--windows", default="0,5,25",
+                         help="Comma-separated match windows in nt (default 0,5,25)")
+    compare.add_argument("--out", help="Write per-query offsets to this TSV")
     return parser
 
 
@@ -643,13 +807,38 @@ def main(argv=None):
         print("    " + " \\\n    ".join(libs))
         return 0
 
+    if args.command == "compare":
+        rename = dict(item.split("=", 1) for item in args.rename)
+        columns = (tuple(int(c) for c in args.ref_columns.split(","))
+                   if args.ref_columns else None)
+        query = read_sites(args.query)
+        reference = read_sites(args.reference, columns, rename)
+        windows = [int(w) for w in args.windows.split(",")]
+        summary, rows = compare_sites(query, reference, windows)
+        print(format_comparison(summary))
+        if args.out:
+            with open(args.out, "w") as out:
+                out.write("seqid\tstrand\tposition\toffset_to_nearest_reference\n")
+                for seqid, strand, pos, offset in rows:
+                    out.write("%s\t%s\t%d\t%s\n" % (
+                        seqid, strand, pos, "NA" if offset is None else offset))
+        return 0
+
+    settings = dict(PRESETS[args.preset])
+    for name in settings:
+        value = getattr(args, name, None)
+        if value is not None:
+            settings[name] = value
+
     enriched = [load_library(p, args.mate, args.min_mapq) for p in args.enriched]
     controls = [load_library(p, args.mate, args.min_mapq) for p in args.control]
-    calls = call_positions(enriched, controls, min_rpm=args.min_rpm,
-                           min_log2fc=args.min_log2fc,
+    calls = call_positions(enriched, controls, min_rpm=settings["min_rpm"],
+                           min_log2fc=settings["min_log2fc"],
                            min_replicates=args.min_replicates,
-                           pseudocount=args.pseudocount)
-    calls = cluster_tss(calls, args.cluster_distance)
+                           pseudocount=settings["pseudocount"],
+                           control_floor=settings["control_floor"],
+                           rpm_decimals=settings["rpm_decimals"])
+    calls = cluster_tss(calls, settings["cluster_distance"])
     if args.annotation:
         genes = read_genes(args.annotation, tuple(args.feature_types.split(",")))
         classify(calls, genes, args.utr_length, args.antisense_distance)

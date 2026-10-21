@@ -126,6 +126,70 @@ class CallingTests(unittest.TestCase):
         self.assertTrue(os.path.exists(prefix + ".tsv"))
 
 
+class EttwillerPresetTests(unittest.TestCase):
+    """Behaviour of filter_tss.pl / bam2firstbasegtf.pl (Ettwiller et al.)."""
+
+    def signal(self, counts):
+        sig = ct.new_signal()
+        for pos, n in counts.items():
+            sig[("chr", "+")][pos] = n
+        return sig
+
+    def call(self, enriched, control):
+        preset = dict(ct.PRESETS["ettwiller2016"])
+        preset.pop("cluster_distance")
+        return {t.pos: t for t in ct.call_positions(
+            [self.signal(enriched)], [self.signal(control)], **preset)}
+
+    def test_missing_control_counts_as_one_read(self):
+        # 1e6 reads in each library; 10 enriched reads = 10 RPM, control 0
+        calls = self.call({1: 10, 2: 999990}, {5: 1000000})
+        self.assertAlmostEqual(calls[1].control_rpm, 1.0)
+        self.assertAlmostEqual(calls[1].log2fc, 3.321928, places=5)
+
+    def test_equal_enrichment_passes_at_zero(self):
+        calls = self.call({1: 10, 2: 999990}, {1: 10, 5: 999990})
+        self.assertIn(1, calls)
+        self.assertAlmostEqual(calls[1].log2fc, 0.0)
+
+    def test_depleted_position_removed(self):
+        calls = self.call({1: 10, 2: 999990}, {1: 11, 5: 999989})
+        self.assertNotIn(1, calls)
+
+    def test_rpm_rounded_before_cutoff(self):
+        # 1499.6 reads in 1e9 -> 1.4996 RPM, rounds to 1.500 and passes
+        calls = self.call({1: 1499.6, 2: 1e9 - 1499.6}, {5: 1e9})
+        self.assertIn(1, calls)
+
+    def test_cluster_distance_matches_bedtools_merge_d5(self):
+        def tss(pos, rpm):
+            return ct.TSS("chr", pos, "+", rpm, 0, 0, 1)
+        merged = ct.cluster_tss([tss(100, 5), tss(106, 9), tss(113, 1)],
+                                ct.PRESETS["ettwiller2016"]["cluster_distance"])
+        self.assertEqual([t.pos for t in merged], [106, 113])
+
+
+class CompareTests(unittest.TestCase):
+    def test_windows_and_offsets(self):
+        query = {("chr", "+", 100), ("chr", "+", 205), ("chr", "-", 500),
+                 ("chr", "+", 900)}
+        reference = {("chr", "+", 100), ("chr", "+", 200), ("chr", "-", 503),
+                     ("chr", "-", 700)}
+        summary, rows = ct.compare_sites(query, reference, windows=(0, 5))
+        w0, w5 = summary["windows"]
+        self.assertEqual((w0["query_matched"], w0["reference_recovered"]), (1, 1))
+        self.assertEqual((w5["query_matched"], w5["reference_recovered"]), (3, 3))
+        offsets = {(r[1], r[2]): r[3] for r in rows}
+        self.assertEqual(offsets[("+", 205)], 5)    # 5 nt downstream
+        self.assertEqual(offsets[("-", 500)], 3)    # downstream on - strand
+
+    def test_read_table_with_columns_and_rename(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = write(tmp, "ref.csv", "chrom,pos,strand\nNC_1,10,forward\nNC_1,20,-\n")
+            sites = ct.read_sites(path, columns=(1, 2, 3), rename={"NC_1": "chr"})
+        self.assertEqual(sites, {("chr", "+", 10), ("chr", "-", 20)})
+
+
 class ExportTests(unittest.TestCase):
     def test_annogesic_libs(self):
         with tempfile.TemporaryDirectory() as tmp:

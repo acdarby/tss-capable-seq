@@ -73,6 +73,24 @@ not values taken from a paper. Tune them for your sequencing depth and
 enrichment efficiency; checking a few known promoters in a genome browser
 is the quickest test.
 
+#### Reproducing Ettwiller et al. 2016
+
+`--preset ettwiller2016` applies the thresholds of the published
+Cappable-seq pipeline (scripts at https://github.com/Ettwiller/TSS):
+
+| Step | Ettwiller script | Setting |
+|---|---|---|
+| Read-start strength | `bam2firstbasegtf.pl --cutoff 1.5` | RPM ≥ 1.5, rounded to 3 decimals |
+| Enrichment | `filter_tss.pl --cutoff 0` | log2(enriched / control) ≥ 0, no pseudocount; a position with no control reads is given one control read |
+| Clustering | `cluster_tss.pl --cutoff 5` | `bedtools merge -d 5`, which merges starts up to 6 nt apart; the strongest is kept |
+
+Options given explicitly override the preset (for example
+`--preset ettwiller2016 --min-replicates 2`). On simulated single-end
+data, this preset gives exactly the same TSS as running Ettwiller's scripts
+(at RPM cut-offs of 1.5, 20 and 60). For an exact match, map single-end
+reads (Ettwiller et al. used Bowtie2 in local mode) and do not filter on
+`--min-mapq`, because their read total counts every mapped read.
+
 Input notes:
 
 * **BAM**: unmapped, secondary, supplementary and QC-fail reads are
@@ -117,6 +135,27 @@ python cappable_tss.py annogesic-libs \
   TSS you have checked by hand).
 * Check the printed library strings against `annogesic tss_ptss --help`
   for your ANNOgesic version.
+
+### `compare`: compare TSS calls with a reference set
+
+Reports how many query TSS lie within each window of a reference TSS
+(`query_in_ref`, a precision-like measure) and how many reference TSS are
+recovered (`ref_recovered`, recall), on the same sequence and strand:
+
+```bash
+python cappable_tss.py compare \
+    --query results/TSS.gff \
+    --reference ettwiller_TSS.gtf \
+    --windows 0,5,25 --out offsets.tsv
+```
+
+The reference can be GFF/GTF, or a tab- or comma-separated table with
+`--ref-columns seqid,position,strand` column numbers (for example
+`--ref-columns 1,2,3`). Use `--rename OLD=NEW` if the two sets name the
+chromosome differently, and make sure both use the same genome version:
+coordinates differ between, for example, *E. coli* U00096.2 and U00096.3.
+`offsets.tsv` lists, for each query TSS, the distance to the nearest
+reference TSS in the direction of transcription.
 
 ## Tests
 
