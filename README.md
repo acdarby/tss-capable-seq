@@ -134,8 +134,8 @@ python cappable_tss.py annogesic-libs \
   them for Cappable-seq (ANNOgesic's `optimize_tss_ps`, using a set of
   TSS you have checked by hand).
 * The library string format (`file:tex:1:a:+`) and the `tss_ps` command
-  name were checked against ANNOgesic 1.1.14; older releases called the
-  command `tss_ptss`.
+  name were checked against ANNOgesic 1.1.14; check `annogesic tss_ps -h`
+  if you use another version.
 
 ### `compare`: compare TSS calls with a reference set
 
