@@ -9,7 +9,7 @@ prepare Cappable-seq data for the original ANNOgesic pipeline.
 
 ## Why not use ANNOgesic's TSS step as it is?
 
-ANNOgesic's `tss_ptss` module runs TSSpredator (Dugar et al. 2013). For
+ANNOgesic's `tss_ps` module runs TSSpredator (Dugar et al. 2013). For
 dRNA-seq, TSSpredator compares a library treated with terminator
 exonuclease (TEX+), which is enriched for primary transcripts, with an
 untreated library (TEX-), and looks for sharp rises ("steps") in read
@@ -111,7 +111,7 @@ Input notes:
 Use this if you want to stay inside the ANNOgesic workflow, for example to
 use its TSSpredator parameter optimisation or its downstream modules. It
 writes forward and reverse wiggle files for each library and prints the
-strings to pass to `annogesic tss_ptss --tex_notex_libs`. The enriched
+strings to pass to `annogesic tss_ps --tex_notex_libs`. The enriched
 library is labelled `tex` and the control `notex`, so TSSpredator compares
 enriched with control:
 
@@ -131,10 +131,11 @@ python cappable_tss.py annogesic-libs \
 * Replicates are labelled `a`, `b`, `c`… in input order, under condition
   `--condition` (default 1).
 * TSSpredator's default parameters are tuned for dRNA-seq, so re-optimise
-  them for Cappable-seq (ANNOgesic's `optimize_tss_ptss`, using a set of
+  them for Cappable-seq (ANNOgesic's `optimize_tss_ps`, using a set of
   TSS you have checked by hand).
-* Check the printed library strings against `annogesic tss_ptss --help`
-  for your ANNOgesic version.
+* The library string format (`file:tex:1:a:+`) and the `tss_ps` command
+  name were checked against ANNOgesic 1.1.14; older releases called the
+  command `tss_ptss`.
 
 ### `compare`: compare TSS calls with a reference set
 

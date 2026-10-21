@@ -27,7 +27,7 @@ kind of data:
 ``annogesic-libs``
     Convert Cappable-seq alignments into wiggle files plus the
     ``--tex_notex_libs`` strings needed to run the original ANNOgesic
-    ``tss_ptss`` subcommand, with the enriched library standing in for TEX+
+    ``tss_ps`` subcommand, with the enriched library standing in for TEX+
     and the control for TEX-.
 
 Only the Python standard library is needed.  BAM input additionally needs
@@ -765,7 +765,7 @@ def build_parser():
 
     export = sub.add_parser(
         "annogesic-libs",
-        help="Write wiggle files and --tex_notex_libs strings for ANNOgesic tss_ptss")
+        help="Write wiggle files and --tex_notex_libs strings for ANNOgesic tss_ps")
     add_inputs(export)
     export.add_argument("--signal", choices=("coverage", "5prime"),
                         default="coverage",
@@ -803,7 +803,7 @@ def main(argv=None):
             args.enriched, args.control, args.outdir, signal=args.signal,
             mate=args.mate, min_mapq=args.min_mapq, condition=args.condition,
             negative_reverse=not args.positive_reverse)
-        print("Use with: annogesic tss_ptss ... --tex_notex_libs \\")
+        print("Use with: annogesic tss_ps ... --tex_notex_libs \\")
         print("    " + " \\\n    ".join(libs))
         return 0
 
