@@ -158,6 +158,14 @@ coordinates differ between, for example, *E. coli* U00096.2 and U00096.3.
 `offsets.tsv` lists, for each query TSS, the distance to the nearest
 reference TSS in the direction of transcription.
 
+## Benchmarks
+
+`benchmarks/ettwiller2016/` re-runs the *E. coli* Cappable-seq data of
+Ettwiller et al. 2016 from raw reads and scores the calls against the
+published TSS table; see its README for results. `benchmarks/tools/` has
+helpers to list and download SRA runs from AWS Open Data mirrors, to predict
+genes when no annotation is available, and to compute TSS statistics.
+
 ## Tests
 
 ```bash

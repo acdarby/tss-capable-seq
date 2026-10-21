@@ -1,0 +1,20 @@
+name: tss-benchmarks
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - python=3.11
+  - pysam
+  - numpy
+  - scikit-learn
+  - pyarrow
+  - bowtie2
+  - samtools
+  - bedtools
+  - cutadapt
+  - sra-tools
+  - pigz
+  - prodigal
+  - barrnap
+  - aragorn
+  - meme
