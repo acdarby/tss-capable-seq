@@ -114,7 +114,7 @@ class CallingTests(unittest.TestCase):
         e = write(d, "e2.bed", bed_reads("chr", 150, "+", 50))
         c = write(d, "c2.bed", bed_reads("chr", 999, "+", 50))
         a = write(d, "a2.gff", GFF)
-        prefix = os.path.join(d, "out")
+        prefix = os.path.join(d, "results", "out")   # directory not yet made
         ct.main(["call", "--enriched", e, "--control", c, "--annotation", a,
                  "--out-prefix", prefix])
         with open(prefix + ".gff") as handle:

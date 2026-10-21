@@ -653,6 +653,9 @@ def main(argv=None):
     if args.annotation:
         genes = read_genes(args.annotation, tuple(args.feature_types.split(",")))
         classify(calls, genes, args.utr_length, args.antisense_distance)
+    out_dir = os.path.dirname(args.out_prefix)
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True)
     write_gff(calls, args.out_prefix + ".gff")
     write_table(calls, args.out_prefix + ".tsv")
     print(summarise(calls))
