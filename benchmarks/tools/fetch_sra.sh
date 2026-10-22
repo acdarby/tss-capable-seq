@@ -13,7 +13,7 @@ if [ -s "$out" ]; then echo "exists: $out"; exit 0; fi
 curl -sS --retry 4 -o "$outdir/$acc.sra" "https://sra-pub-run-odp.s3.amazonaws.com/sra/$acc/$acc"
 # --size-check off: fasterq-dump otherwise refuses when its temp-space estimate
 # exceeds free disk; fall back to streaming fastq-dump if it still fails.
-fasterq-dump --size-check off --split-spot --skip-technical -Z "$outdir/$acc.sra" 2> "$outdir/$label.dump.log" \
+fasterq-dump --size-check off -t "$outdir" --split-spot --skip-technical -Z "$outdir/$acc.sra" 2> "$outdir/$label.dump.log" \
     | pigz -p "${THREADS:-4}" > "$out" || true
 if [ "$(stat -c %s "$out")" -lt 1000 ]; then
     fastq-dump --split-spot --skip-technical --stdout "$outdir/$acc.sra" 2>> "$outdir/$label.dump.log" \
