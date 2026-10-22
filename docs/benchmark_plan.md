@@ -29,7 +29,7 @@ becomes a default. `--preset ettwiller2016` stays as the fixed baseline.
       stranded RNA-seq.
 - [ ] *Buchnera* (own data): obtain reads, genome and annotation; record
       strain, host, library kit, replicates and whether a non-enriched control
-      exists (see section 7).
+      exists (see section 8).
 - [ ] Suliman et al. unenriched libraries (Table 1 of the paper): locate or
       deposit; they would give *Wolbachia* a real control.
 - [ ] Write a dataset manifest (`benchmarks/datasets.yaml`): accessions,
@@ -50,9 +50,12 @@ scored on several independent lines of evidence:
       against the same positions shifted 100 nt. Use a motif learned from each
       genome's own confident TSS (not *E. coli* TATAAT), because AT-rich
       genomes inflate fixed-word matches.
-- [ ] **Orthogonal support** (wAlbB): share of TSS with a coverage step in
-      the PRJNA1392518 enriched libraries relative to unenriched, against
-      shifted positions.
+- [ ] **Orthogonal support** (wAlbB): share of TSS with a coverage rise
+      (≥ 1.5×, 50 nt downstream vs upstream) in the PRJNA1392518 enriched
+      library, against shifted positions. First result: 73.1% of TSS called
+      with the Suliman settings, 48.6% of the extra TSS called by the
+      Ettwiller preset, 6.7% of shifted positions. (Enrichment over the
+      unenriched library does not discriminate: 97% of shifted positions pass.)
 - [ ] **Reproducibility**: leave-one-replicate-out — call on n−1 replicates
       and measure how many calls the held-out replicate supports.
 - [ ] **Depth robustness**: downsample to 50%, 25% and 10% of reads and
@@ -80,7 +83,7 @@ scored on several independent lines of evidence:
 
 ## 4. Approaches to develop
 
-Each one is an option that stays off by default until it passes section 5.
+Each one is an option that stays off by default until it passes sections 5 and 6.
 
 - [ ] **A. Library-type check**: share of reads at the 1,000 busiest start
       positions, strand of reads inside genes, insert size; warn when a
@@ -108,7 +111,59 @@ Each one is an option that stays off by default until it passes section 5.
 - [ ] **I. Negative-binomial model across replicates and conditions**
       (DESeq2/edgeR-like), only if F is not enough; adds heavier dependencies.
 
-## 5. How each approach is judged
+## 5. Testing the statistical approaches (C, D, E, F)
+
+A statistical call is only useful if its p-values and false-discovery rates
+mean what they say. Each test below must pass before the approach is judged
+on biology in section 6.
+
+**Correctness of the arithmetic**
+
+- [ ] Unit tests: binomial and Poisson tail probabilities, Fisher's combined
+      p-value and Benjamini–Hochberg q-values against reference values
+      computed independently (e.g. with SciPy in the test suite only).
+- [ ] Edge cases: zero control reads, zero background, a single replicate,
+      very deep positions (no underflow), ties in q-values.
+
+**Calibration under the null (no false discoveries expected)**
+
+- [ ] Simulated null: libraries with no planted TSS. p-values must be close
+      to uniform (QQ plot) and the FDR at 1%, 5%, 10% must hold.
+- [ ] Real-data null for test C: split one library into two halves by random
+      read sampling (control vs control, and enriched vs enriched); calls at
+      a given FDR should be about that fraction of tests, not thousands.
+- [ ] Real-data null for test C: swap enriched and control labels (*E. coli*);
+      the "TSS" called should be processed ends (tRNA/rRNA), not promoters.
+- [ ] Real-data null for test D: positions shifted 100 nt and randomly placed
+      positions with the same read count; the call rate at a given FDR should
+      be near the nominal level.
+- [ ] Dispersion check: across the Suliman triplicates, compare variance with
+      mean per position; if the variance clearly exceeds the mean, the
+      Poisson tests are anti-conservative and approach F/I must use a
+      negative-binomial model instead.
+
+**Power and robustness**
+
+- [ ] Simulation with planted TSS of known strength at several depths
+      (including *Wolbachia*-like 1–2 M reads): recall at fixed FDR compared
+      with the fixed cut-offs, as power curves by TSS strength.
+- [ ] Downsampling the real libraries (50%, 25%, 10%): statistical calls
+      should lose weak TSS gradually; fixed RPM cut-offs change meaning with
+      depth.
+- [ ] Parameter sensitivity: local-background window (±50, 100, 200 nt),
+      minimum read count (2, 3, 5), FDR level; results should not hinge on one
+      setting.
+
+**Matched comparison with the fixed cut-offs**
+
+- [ ] For the same number of calls, compare statistical ranking with RPM
+      ranking on the independent evidence: −10 box rate, orthogonal coverage
+      rise in PRJNA1392518 (wAlbB), *E. coli* Table S1 recall, held-out
+      replicate support. This separates "better ranking" from "more calls".
+- [ ] For each dataset, report what the fixed cut-off and the FDR call each
+      gain and lose, with the independent evidence for both sets.
+
+## 6. How each approach is judged
 
 For every approach and every dataset, compared with the `ettwiller2016` and
 Suliman baselines:
@@ -124,23 +179,24 @@ Suliman baselines:
 An approach becomes a default only if it passes on *E. coli* and at least
 two of the symbiont datasets, and the result is written into the report.
 
-## 6. Development steps
+## 7. Development steps
 
 - [ ] Write the dataset manifest and the benchmark harness (sections 1–2).
 - [ ] Add simulation of planted TSS (section 2).
 - [ ] Implement A (library-type check) — small, independent, protects users.
-- [ ] Implement B + C + E (control-based statistics); benchmark on *E. coli*.
-- [ ] Implement D + E (local background); benchmark on *Salmonella*, wAlbB,
-      wMelPop-CLA, *Buchnera*.
+- [ ] Implement B + C + E (control-based statistics); run the section 5
+      tests, then benchmark on *E. coli*.
+- [ ] Implement D + E (local background); run the section 5 tests, then
+      benchmark on *Salmonella*, wAlbB, wMelPop-CLA, *Buchnera*.
 - [ ] Implement F (replicates); leave-one-out benchmark on the triplicates.
 - [ ] Implement G (peak shape); benchmark base-level precision.
 - [ ] Turn `selftrain.py` into H (`learn` subcommand); benchmark promoter
       scores per genome, including *Buchnera*.
-- [ ] Decide new defaults from section 5; keep `--preset ettwiller2016`.
+- [ ] Decide new defaults from sections 5 and 6; keep `--preset ettwiller2016`.
 - [ ] Unit tests for every new statistic (exact values on small inputs).
 - [ ] Update README, benchmark READMEs and the report after each step.
 
-## 7. Open questions
+## 8. Open questions
 
 - [ ] *Buchnera*: species/strain and genome accession, host aphid, library
       kit (5'-ligation Cappable-seq or fragment library), read layout,
@@ -149,4 +205,4 @@ two of the symbiont datasets, and the result is written into the report.
 - [ ] Where should the full benchmark run? This cloud session has about 30 GB
       of disk and 2-hour background jobs; a cluster run of the harness would
       allow all 63 Suliman libraries.
-- [ ] Acceptance thresholds in section 5: agree or adjust.
+- [ ] Acceptance thresholds in section 6: agree or adjust.
