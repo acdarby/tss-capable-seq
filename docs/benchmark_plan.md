@@ -14,9 +14,19 @@ becomes a default. `--preset ettwiller2016` stays as the fixed baseline.
       triplicate mapped; 33 further libraries (temperature, antibiotics) available.
 - [x] *Wolbachia* wMelPop-CLA, Suliman et al. 2025: 28 °C 48 h triplicate
       mapped; low depth (1–2 M *Wolbachia* reads per library).
-- [x] *Wolbachia* wAlbB PRJNA1392518: stranded fragment RNA-seq of enriched and
-      non-enriched RNA. Not 5'-end data: use as the negative case for the
-      library-type check and as coverage data for TSSpredator/ANNOgesic.
+- [x] *Wolbachia* wAlbB PRJNA1392518 (Frontiers in Microbiology 2026,
+      doi:10.3389/fmicb.2026.1860204): same Aa23 cell line as Suliman et al.,
+      but whole primary transcripts captured, then heat-fragmented and
+      sequenced with NEBNext Ultra II Directional (random-primed, stranded,
+      read 2 = sense, 2 × 150 bp). Three experiments: unenriched / 1 / 2
+      rounds of enrichment; unenriched / XRN-1 / XRN-1 + Cappable-seq /
+      Cappable-seq; days 3–7 time course in triplicate. Not 5'-end data.
+      Cappable-seq and unenriched libraries of the XRN-1 experiment mapped.
+- [ ] Use PRJNA1392518 as an independent check of wAlbB TSS: coverage rises
+      (enriched vs unenriched) at TSS called from the Suliman 5'-end data.
+- [ ] Run TSSpredator/ANNOgesic on PRJNA1392518 (its intended data type) and
+      ANNOgesic transcript, terminator and operon modules on its unenriched
+      stranded RNA-seq.
 - [ ] *Buchnera* (own data): obtain reads, genome and annotation; record
       strain, host, library kit, replicates and whether a non-enriched control
       exists (see section 7).
@@ -40,6 +50,9 @@ scored on several independent lines of evidence:
       against the same positions shifted 100 nt. Use a motif learned from each
       genome's own confident TSS (not *E. coli* TATAAT), because AT-rich
       genomes inflate fixed-word matches.
+- [ ] **Orthogonal support** (wAlbB): share of TSS with a coverage step in
+      the PRJNA1392518 enriched libraries relative to unenriched, against
+      shifted positions.
 - [ ] **Reproducibility**: leave-one-replicate-out — call on n−1 replicates
       and measure how many calls the held-out replicate supports.
 - [ ] **Depth robustness**: downsample to 50%, 25% and 10% of reads and
