@@ -14,13 +14,13 @@ bash run.sh /path/to/workdir /path/to/12864_2016_2539_MOESM1_ESM.gtf
 
 The GTF is the paper's supplementary TSS table (16,359 TSS on U00096.2),
 available from the article page. Everything else is downloaded from AWS Open
-Data mirrors, so NCBI and ENA access is not needed:
+Data mirrors; only the curated annotation comes from NCBI:
 
 | Input | Source |
 |---|---|
 | Reads ERR930221 (enriched), ERR930222 (technical replicate), ERR930223 (non-enriched control), ENA PRJEB9717 | `sra-pub-run-odp` S3 bucket |
 | Genome U00096.2 (= NC_000913.2, 4,639,675 bp) | AWS iGenomes, *E. coli* K-12 MG1655 NCBI 2001-10-15 |
-| Gene annotation | predicted with Prodigal, barrnap and ARAGORN (`../tools/annotate_genome.sh`) |
+| Gene annotation | GenBank U00096.2 from NCBI; predicted with Prodigal, barrnap and ARAGORN (`../tools/annotate_genome.sh`) if NCBI is not reachable |
 
 Mapping follows the paper: cutadapt with the NEBNext small RNA adapter and
 Bowtie2 `--local -L 16`. Outputs are `comparison.txt`, `offsets.tsv`,
@@ -42,8 +42,10 @@ positions across the 1.5 RPM cut-off. On simulated data the preset gives
 exactly the same TSS as Ettwiller's Perl scripts.
 
 `statistics.txt` reproduces the paper's figures on Table S1 within about one
-percentage point (for example 80.9% A/G at +1, 63.0% of TSS inside a CDS),
-except for C/T at −1 (71.4% against 76% reported).
+percentage point with the GenBank annotation (for example 80.9% A/G at +1,
+63.5% of TSS inside a CDS, and exactly the 82 leaderless TSS reported),
+except for C/T at −1 (71.4% against 76% reported). With predicted genes the
+figures differ by less than one point.
 
 Other findings from this dataset, which motivate the planned changes to `call`:
 

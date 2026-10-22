@@ -24,7 +24,13 @@ if [ ! -s genome.fa ]; then
 fi
 len=$(grep -v '>' genome.fa | tr -d '\n' | wc -c)
 [ "$len" -eq 4639675 ] || { echo "unexpected genome length $len"; exit 1; }
-[ -s annotation.gff ] || bash "$repo/benchmarks/tools/annotate_genome.sh" genome.fa U00096.2 annotation.gff
+# Curated GenBank annotation of U00096.2 (the one the paper used); if NCBI is not
+# reachable, fall back to predicted genes.
+if [ ! -s annotation.gff ]; then
+  curl -sS "https://www.ncbi.nlm.nih.gov/sviewer/viewer.cgi?db=nuccore&report=gff3&id=U00096.2" > annotation.gff || true
+  grep -q -P "\tCDS\t" annotation.gff 2> /dev/null \
+    || bash "$repo/benchmarks/tools/annotate_genome.sh" genome.fa U00096.2 annotation.gff
+fi
 [ -e idx.1.bt2 ] || bowtie2-build -q genome.fa idx
 
 # 2. Reads (ENA PRJEB9717): enriched, technical replicate, non-enriched control.
