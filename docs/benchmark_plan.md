@@ -24,9 +24,10 @@ becomes a default. `--preset ettwiller2016` stays as the fixed baseline.
       Cappable-seq and unenriched libraries of the XRN-1 experiment mapped.
 - [ ] Use PRJNA1392518 as an independent check of wAlbB TSS: coverage rises
       (enriched vs unenriched) at TSS called from the Suliman 5'-end data.
-- [ ] Run TSSpredator/ANNOgesic on PRJNA1392518 (its intended data type) and
-      ANNOgesic transcript, terminator and operon modules on its unenriched
-      stranded RNA-seq.
+- [x] Run TSSpredator/ANNOgesic on PRJNA1392518 (its intended data type) and
+      ANNOgesic transcript, terminator, UTR and operon modules
+      (`benchmarks/frontiers2026/`). TSSpredator: 89% of its 250 TSS within
+      25 nt of 5'-end TSS, but a median 12 nt downstream; 14% recall.
 - [ ] *Buchnera* (own data): obtain reads, genome and annotation; record
       strain, host, library kit, replicates and whether a non-enriched control
       exists (see section 8).
