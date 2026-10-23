@@ -1,0 +1,4 @@
+dataset	method	n_tss	share_Primary	share_Secondary	share_Internal	share_Antisense	share_Orphan	box10_all	box35_all	box10_Primary	box10_Internal	box10_Antisense	box10_background	loo_support	down0.5_n	down0.5_recovery	down0.25_n	down0.25_recovery
+salmonella	ettwiller2016	10609	0.242	0.150	0.373	0.344	0.030	0.332	0.089	0.360	0.295	0.356	0.025	0.882	10414	0.934	10025	0.876
+salmonella	local	40173	0.092	0.140	0.445	0.411	0.028	0.258	0.066	0.329	0.218	0.282	0.024	0.786	28986	0.713	20356	0.500
+salmonella	local_allreps	37071	0.098	0.141	0.442	0.409	0.028	0.263	0.067	0.330	0.222	0.287	0.024	0.786	26767	0.715	18755	0.500

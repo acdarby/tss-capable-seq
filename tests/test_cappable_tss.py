@@ -484,14 +484,43 @@ class LocalBackgroundTests(unittest.TestCase):
             sig[("c", "+")][20000] = 40.0          # a TSS
             sig[("c", "-")][30000] = 15.0          # a TSS in an empty region
             reps.append(sig)
-        reps[1][("c", "-")][40000] = 30.0          # one replicate only: not called
-        calls = ct.call_local(reps, dispersion=2.0)
+        reps[1][("c", "-")][40000] = 30.0          # one replicate only
+        calls = ct.call_local(reps, dispersion=2.0, min_replicates=2)
         self.assertEqual({(t.strand, t.pos) for t in calls}, {("+", 20000), ("-", 30000)})
+        anyrep = {t.key: t for t in ct.call_local(reps, dispersion=2.0)}
+        self.assertIn(("c", "-", 40000), anyrep)    # called, but flagged as inconsistent
+        self.assertLess(anyrep[("c", "-", 40000)].consistency_p, 1e-3)
+        self.assertGreater(anyrep[("c", "+", 20000)].consistency_p, 0.01)
         self.assertGreater(calls[0].background, 0)
         # With a control in which the site is far more abundant it is dropped.
         ctl = {("c", "+"): {20000: 5000.0, 5: 10.0}, ("c", "-"): {5: 10.0}}
-        kept = ct.call_local(reps, [ctl, ctl], dispersion=2.0)
+        kept = ct.call_local(reps, [ctl, ctl], dispersion=2.0, min_replicates=2)
         self.assertEqual({(t.strand, t.pos) for t in kept}, {("-", 30000)})
+
+    def test_chi2_sf(self):
+        # Closed forms: dof 1 = erfc(sqrt(x/2)); dof 3 adds sqrt(2x/pi) exp(-x/2).
+        for x in (0.1, 1.0, 4.0, 30.0):
+            self.assertAlmostEqual(ct.chi2_sf(x, 1), math.erfc(math.sqrt(x / 2)))
+            self.assertAlmostEqual(ct.chi2_sf(x, 3), math.erfc(math.sqrt(x / 2))
+                                   + math.sqrt(2 * x / math.pi) * math.exp(-x / 2))
+            self.assertAlmostEqual(ct.chi2_sf(x, 4), math.exp(-x / 2) * (1 + x / 2))
+        try:
+            from scipy.stats import chi2
+        except ImportError:
+            return
+        for dof in range(1, 12):
+            for x in (0.5, 3.0, 12.0, 60.0):
+                self.assertAlmostEqual(ct.chi2_sf(x, dof) / chi2.sf(x, dof), 1.0, places=8)
+
+    def test_consistency_pvalue(self):
+        sizes = [1e6, 2e6, 1e6]
+        self.assertGreater(ct.consistency_pvalue([25, 50, 25], sizes, 0.02), 0.9)
+        self.assertLess(ct.consistency_pvalue([100, 0, 0], sizes, 0.02), 1e-10)
+        # Extra between-library variation makes the same counts less surprising.
+        self.assertGreater(ct.consistency_pvalue([40, 50, 10], sizes, 0.5),
+                           ct.consistency_pvalue([40, 50, 10], sizes, 0.0))
+        self.assertNotEqual(ct.consistency_pvalue([5], [1e6], 0.0),
+                            ct.consistency_pvalue([5], [1e6], 0.0))   # NaN
 
     def test_call_local_cli(self):
         with tempfile.TemporaryDirectory() as tmp:

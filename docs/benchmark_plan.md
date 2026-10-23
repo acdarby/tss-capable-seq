@@ -100,8 +100,11 @@ Each one is an option that stays off by default until it passes sections 5 and 6
       surrounding ±50–200 nt, excluding the cluster itself.
 - [x] **E. False-discovery rate**: Benjamini–Hochberg q-values over tested
       positions (positions with ≥ 2–3 reads).
-- [ ] **F. Replicates as evidence**: combine per-replicate p-values (Fisher)
+- [x] **F. Replicates as evidence**: combine per-replicate p-values (Fisher)
       with a direction check; report a reproducibility score per TSS.
+      Result: Fisher is invalid for the local test (background repeats
+      between replicates); pooling, reads in one replicate, and a per-TSS
+      consistency p-value instead (benchmarks/README.md).
 - [ ] **G. Peak shape**: local-peak ratio and cluster spread, so the
       strongest position of an imprecise promoter is reported once and weak
       shoulders are not called separately.
@@ -202,7 +205,7 @@ two of the symbiont datasets, and the result is written into the report.
       is a setting and q-values are nominal; needs replicates. Buchnera to do.
       Open: the real-data null for D (no clean null exists in 5'-end data:
       the background is reproducible) and the choice of stop.
-- [ ] Implement F (replicates); leave-one-out benchmark on the triplicates.
+- [x] Implement F (replicates); leave-one-out benchmark on the triplicates.
 - [ ] Implement G (peak shape); benchmark base-level precision.
 - [ ] Turn `selftrain.py` into H (`learn` subcommand); benchmark promoter
       scores per genome, including *Buchnera*.
@@ -210,7 +213,36 @@ two of the symbiont datasets, and the result is written into the report.
 - [ ] Unit tests for every new statistic (exact values on small inputs).
 - [ ] Update README, benchmark READMEs and the report after each step.
 
-## 8. Open questions
+## 8. Deliverables
+
+The end products of this plan:
+
+- [ ] **Ranked experimental-design recommendations**: which designs give
+      reliable TSS, ranked on the benchmarks (control or not; number of
+      biological replicates; technical against biological replicates;
+      sequencing depth, using downsampling; library type, 5'-ligation against
+      fragment libraries; spike-ins or UMIs if data exist). Each
+      recommendation states the evidence (dataset, measure) and what is
+      lost without it. Evidence so far:
+      - 5'-end (adapter-ligation) libraries are required; fragment libraries
+        do not mark TSS (section A; Frontiers 2026 data).
+      - Biological replicates are worth more than one deep library: they
+        let the local test stop sensibly and measure between-library
+        variation; with one library, read stacks are called (D, F).
+      - A non-enriched control is what removes processed ends: without one,
+        no method separates them from TSS in the simulation (D).
+      - Depth: the RPM cut-off calls more noise at lower depth; the
+        statistical tests lose weak TSS gradually (C, D).
+- [ ] **One tool with a standard mode and a development mode.**
+      - Standard mode: `call --design auto` (or a named design) chooses the
+        method and settings from the inputs (replicates, control, library
+        check) using the benchmark results, and reports per-TSS confidence
+        (q-value, replicate support, consistency, later the promoter score).
+      - Development mode: every method and setting exposed, as now, plus the
+        benchmark tools, for new designs and for re-tuning on new organisms.
+      - Both modes documented with the design table they rely on.
+
+## 9. Open questions
 
 - [ ] *Buchnera*: species/strain and genome accession, host aphid, library
       kit (5'-ligation Cappable-seq or fragment library), read layout,

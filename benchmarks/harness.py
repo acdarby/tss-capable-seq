@@ -92,6 +92,13 @@ def method_local(enriched, controls, ctx=None):
     return ct.cluster_tss(calls, 6)
 
 
+def method_local_allreps(enriched, controls, ctx=None):
+    """As local, but with reads in every replicate."""
+    calls = ct.call_local(enriched, controls or None, min_replicates=len(enriched),
+                          exclude=(ctx or {}).get("exclude"))
+    return ct.cluster_tss(calls, 6)
+
+
 METHODS = {
     "ettwiller2016": method_ettwiller2016,
     "suliman2025": method_suliman2025,
@@ -100,6 +107,7 @@ METHODS = {
     "betabinom": method_betabinom,
     "betabinom_fold2": method_betabinom_fold2,
     "local": method_local,
+    "local_allreps": method_local_allreps,
 }
 
 

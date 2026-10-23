@@ -197,6 +197,7 @@ class TSS(object):
         self.replicates = replicates       # replicates passing the cut-offs
         self.pvalue = float("nan")         # statistical calling only
         self.qvalue = float("nan")
+        self.consistency_p = float("nan")  # replicate agreement (local calling)
         self.classes = set()
         self.genes = defaultdict(list)     # class -> [(gene name, UTR length)]
 
@@ -457,6 +458,43 @@ def chi2_sf_even(x, dof):
     return min(1.0, math.exp(-half) * total)
 
 
+def chi2_sf(x, dof):
+    """Upper tail of a chi-squared distribution with an integer number of degrees."""
+    if x <= 0:
+        return 1.0
+    if dof % 2 == 0:
+        return chi2_sf_even(x, dof)
+    half = x / 2.0
+    total = math.erfc(math.sqrt(half))          # one degree of freedom
+    term = math.sqrt(2.0 * x / math.pi) * math.exp(-half)
+    for k in range(3, dof + 1, 2):              # sf(k) = sf(k - 2) + term
+        total += term
+        term *= x / k
+    return min(1.0, total)
+
+
+def consistency_pvalue(counts, sizes, dispersion):
+    """Do replicate counts at a site agree, given library sizes?
+
+    Under agreement replicate i has mean E_i = n * N_i / sum(N) (n = pooled
+    count) and variance E_i + dispersion * E_i^2, the between-library
+    variation estimated with estimate_dispersion. Returns the chi-squared
+    p-value of sum((x_i - E_i)^2 / var_i) with (replicates - 1) degrees of
+    freedom; small values mark sites carried by one library (e.g. a stack of
+    PCR duplicates). NaN with fewer than two replicates.
+    """
+    if len(counts) < 2:
+        return float("nan")
+    n, total = sum(counts), sum(sizes)
+    if n <= 0 or total <= 0:
+        return 1.0
+    stat = 0.0
+    for x, size in zip(counts, sizes):
+        e = n * size / total
+        stat += (x - e) ** 2 / (e + dispersion * e * e)
+    return chi2_sf(stat, len(counts) - 1)
+
+
 def fisher_combine(pvalues):
     """Fisher's method: combined p-value of independent tests."""
     pvalues = [max(p, 1e-300) for p in pvalues]
@@ -641,7 +679,7 @@ def pool_signals(signals):
     return pooled
 
 
-def call_local(enriched, controls=None, fdr=0.05, min_reads=3, min_replicates=None,
+def call_local(enriched, controls=None, fdr=0.05, min_reads=3, min_replicates=1,
                window=100, gap=2, trim=5, dispersion=DEFAULT_LOCAL_DISPERSION,
                exclude=None):
     """Call TSS as 5'-end pile-ups above the local background (no control needed).
@@ -650,7 +688,11 @@ def call_local(enriched, controls=None, fdr=0.05, min_reads=3, min_replicates=No
     is reproducible between replicates, so per-replicate tests would not be
     independent. A position is tested if the pooled count is at least
     `min_reads` and it has reads in at least `min_replicates` replicates
-    (default all). Under the null the count is negative binomial with the
+    (default 1: on public biological triplicates, weak sites seen in only
+    some replicates were as promoter-like as those seen in all; missing
+    reads there are sampling, not artefacts). Each call gets
+    `consistency_p` (consistency_pvalue, with the between-replicate
+    dispersion from estimate_dispersion or DEFAULT_DISPERSION). Under the null the count is negative binomial with the
     local background rate (LocalBackground) as mean and `dispersion`
     (see DEFAULT_LOCAL_DISPERSION). Positions with a
     Benjamini-Hochberg q-value <= `fdr` are called; every position of the
@@ -663,6 +705,7 @@ def call_local(enriched, controls=None, fdr=0.05, min_reads=3, min_replicates=No
     min_replicates = reps if min_replicates is None else min_replicates
     pooled = pool_signals(enriched)
     background = LocalBackground(pooled, window, gap, trim)
+    between = (estimate_dispersion(enriched) or DEFAULT_DISPERSION) if reps > 1 else 0.0
     e_size = [library_size(lib, exclude) or 1.0 for lib in enriched]
     ctl = pool_signals(controls) if controls else None
     c_size = (library_size(ctl, exclude) or 1.0) if ctl is not None else None
@@ -700,6 +743,8 @@ def call_local(enriched, controls=None, fdr=0.05, min_reads=3, min_replicates=No
         tss = TSS(seqid, pos, strand, e_rpm, c_rpm, log2fc, present)
         tss.pvalue, tss.qvalue = p, q
         tss.background = rate
+        tss.consistency_p = consistency_pvalue(
+            [lib.get((seqid, strand), {}).get(pos, 0.0) for lib in enriched], e_size, between)
         calls.append(tss)
     calls.sort(key=lambda t: t.key)
     return calls
@@ -879,6 +924,8 @@ def write_gff(tss_list, path, source="ANNOgesic-Cappable"):
             ]
             if tss.qvalue == tss.qvalue:
                 attrs += ["pvalue=%.3g" % tss.pvalue, "qvalue=%.3g" % tss.qvalue]
+            if tss.consistency_p == tss.consistency_p:
+                attrs.append("consistency_p=%.3g" % tss.consistency_p)
             out.write("\t".join([tss.seqid, source, "TSS", str(tss.pos),
                                  str(tss.pos), _fmt(tss.enriched_rpm),
                                  tss.strand, ".", ";".join(attrs)]) + "\n")
@@ -887,7 +934,7 @@ def write_gff(tss_list, path, source="ANNOgesic-Cappable"):
 def write_table(tss_list, path):
     header = ["seqid", "position", "strand", "type", "associated_gene",
               "UTR_length", "enriched_rpm", "control_rpm", "log2_enrichment",
-              "replicates", "pvalue", "qvalue"]
+              "replicates", "pvalue", "qvalue", "consistency_p"]
     with open(path, "w") as out:
         out.write("\t".join(header) + "\n")
         for tss in tss_list:
@@ -895,7 +942,7 @@ def write_table(tss_list, path):
                 tss.seqid, str(tss.pos), tss.strand, _class_text(tss),
                 _gene_text(tss), _utr_text(tss), _fmt(tss.enriched_rpm),
                 _fmt(tss.control_rpm), _fmt(tss.log2fc), str(tss.replicates),
-                _fmt_p(tss.pvalue), _fmt_p(tss.qvalue),
+                _fmt_p(tss.pvalue), _fmt_p(tss.qvalue), _fmt_p(tss.consistency_p),
             ]) + "\n")
 
 
@@ -1311,8 +1358,9 @@ def build_parser():
                       help="Minimum control read count used in the ratio "
                            "(default 0)")
     call.add_argument("--min-replicates", type=int,
-                      help="Replicates in which a position must pass (default: 1 for "
-                           "cutoff, all for binomial)")
+                      help="Replicates in which a position must pass (cutoff, binomial) "
+                           "or have reads (local) (default: 1 for cutoff and local, all "
+                           "for binomial)")
     call.add_argument("--cluster-distance", type=int,
                       help="Merge TSS on the same strand no more than this "
                            "many nt apart; 0 disables (default 5)")
@@ -1436,7 +1484,7 @@ def main(argv=None):
                              "in several replicates; isolated read stacks (e.g. PCR "
                              "duplicates) are then called and the FDR is too optimistic\n")
         calls = call_local(enriched, controls or None, fdr=args.fdr, min_reads=args.min_reads,
-                           min_replicates=min_replicates or len(enriched),
+                           min_replicates=min_replicates or 1,
                            window=args.window, gap=args.gap, trim=args.trim,
                            dispersion=args.local_dispersion, exclude=exclude)
     elif args.method == "binomial":

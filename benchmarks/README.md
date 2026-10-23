@@ -264,3 +264,43 @@ many more weak TSS than the RPM cut-off; whether those are wanted is a
 choice of depth against confidence. The q-values are nominal (the
 dispersion is a setting, not an estimate). `--method cutoff` stays the
 default until the choice of stop is settled (plan section 7).
+
+## Replicates as evidence (approach F, October 2026)
+
+The plan was to combine per-replicate p-values with Fisher's method. That is
+not valid for the local test, because the uneven background repeats in every
+replicate, so replicates are pooled (approach D). What replicates can still
+show was tested on the three datasets with biological replicates:
+
+* **Reads in every replicate are not needed.** Among weak calls, sites with
+  reads in only some replicates are as promoter-like as sites with reads in
+  all of them (−10 box rate, 3–5 pooled reads: wAlbB 32% in one replicate
+  against 31% in all three; wMelPop-CLA 42% / 47%; *Salmonella*, 6–11 reads,
+  26% / 23%). For weak sites, missing reads are sampling. `--method local`
+  therefore needs reads in one replicate by default (`--min-replicates`).
+  This adds 3,772 calls in wAlbB (−10 box 32%, background 8%), 1,855 in
+  wMelPop-CLA (45%, background 7.5%) and 3,102 in *Salmonella* (20%,
+  background 2.4%) (`results/replicates_real_*.tsv`). The exception is
+  *E. coli* with its technical replicate, where sites found in one library
+  only are weaker (12% against 17% at 6–11 reads), consistent with read
+  stacks in a single library.
+* **Rank reproducibility stops too early.** The share of sites that every
+  replicate ranks highly on its own (the idea behind the irreproducible
+  discovery rate, Li, Brown, Huang & Bickel 2011, *Ann. Appl. Stat.*
+  5:1752–1779, doi:10.1214/11-AOAS466) falls from 97% to 15% between ranks
+  6,000 and 16,000 in wAlbB, while the −10 box rate only goes from 47% to
+  34% (background 8%). Single replicates are too shallow for weak sites, so
+  a rule based on rank reproducibility stops at the depth limit, not where
+  the evidence runs out.
+* **Consistency between replicates** is reported per TSS (`consistency_p`:
+  do the replicate counts fit the library sizes and the between-replicate
+  dispersion?). Few sites are flagged (p < 0.001: 0–1.8%), but flagged sites
+  look less like promoters (−10 box among sites with ≥ 30 reads: wAlbB 30%
+  against 47%, *Salmonella* 20% against 33%; *E. coli* with its technical
+  replicate 18% against 27%). Sites with few reads cannot be flagged (no
+  power).
+
+So with biological replicates the replicates agree within the measured
+variation and the evidence lies in the pooled count; replicates are best
+used to measure that variation and flag the rare site carried by one
+library.
