@@ -162,7 +162,8 @@ control. `call` keeps `--method cutoff` as the default.
 ## Test against the local background (approach D, October 2026)
 
 `call --method local`: replicates pooled; a position with ≥ 3 pooled reads and
-reads in every replicate is tested against the 5'-end rate of its
+reads in every replicate (as benchmarked here; the default is now reads in
+one replicate, see approach F below) is tested against the 5'-end rate of its
 neighbourhood (±100 nt, leaving out ±2 nt and the 5 busiest positions, one
 pseudo-read) with a negative binomial; BH FDR 5% over every position of the
 genome; with a control, sites depleted after enrichment are removed (the

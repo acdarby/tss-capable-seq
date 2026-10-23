@@ -138,7 +138,9 @@ matters more than sensitivity.
 
 Works without a control. Replicates are pooled, and a position with at
 least `--min-reads` (3) pooled reads and reads in at least
-`--min-replicates` replicates (default all) is tested against the 5'-end
+`--min-replicates` replicates (default 1; on public triplicates, weak
+sites seen in only some replicates were as promoter-like as those seen in
+all) is tested against the 5'-end
 rate of its neighbourhood: `--window` (100) nt either side, leaving out
 `--gap` (2) nt either side and the `--trim` (5) busiest positions, so a
 neighbouring TSS does not count as background. Counts around the background
@@ -146,7 +148,10 @@ are very uneven, so the test uses a negative binomial with
 `--local-dispersion` (2). Positions with a BH q-value ≤ `--fdr` are called,
 counting every position of the genome as a test. With `--control`, sites
 less abundant after enrichment than in the control (processed ends) are
-removed, as in the Ettwiller pipeline.
+removed, as in the Ettwiller pipeline. With replicates, each TSS also gets
+`consistency_p`: whether its replicate counts fit the library sizes and the
+variation between replicates. Small values (say < 0.001) mark sites carried
+by one library, such as a stack of PCR duplicates.
 
 ```bash
 python cappable_tss.py call --method local \
