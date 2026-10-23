@@ -1,0 +1,24 @@
+Strongest single-base weights (position relative to the TSS):
+ -11 G -0.55
+  -1 A -0.54
+  -8 G -0.44
+ -11 C -0.42
+  -7 G -0.42
+ -11 A +0.41
+  -7 T +0.41
+  -7 C -0.40
+ -10 G -0.38
+ -12 C -0.34
+ -12 G -0.31
+  -8 T +0.30
+  -1 C +0.28
+ -10 A +0.28
+ -14 A -0.28
+  -6 C -0.26
+  -9 G -0.26
+  -8 C -0.26
+  -1 G -0.26
+ -13 A -0.25
+
+Consensus of positive weights, -60..-1 (upper case > 0.15):
+........................tTgg..............t.gGGTTAAATTTg.ggC

@@ -1,0 +1,8 @@
+dataset	method	n	auroc_model	auroc_fixed	confirmed	auroc_reads	auroc_both
+salmonella	recognition_strong	13318	0.926	0.811			
+salmonella	recognition_weak	20100	0.891	0.722			
+salmonella	rescue_0.2	14766	0.580		0.510	0.765	0.782
+salmonella	rescue_score_q1	3691			0.412		
+salmonella	rescue_score_q2	3691			0.504		
+salmonella	rescue_score_q3	3691			0.525		
+salmonella	rescue_score_q4	3693			0.598		

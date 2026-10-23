@@ -111,10 +111,14 @@ Each one is an option that stays off by default until it passes sections 5 and 6
 - [ ] **G. Peak shape**: local-peak ratio and cluster spread, so the
       strongest position of an imprecise promoter is reported once and weak
       shoulders are not called separately.
-- [ ] **H. Genome-specific promoter score**: self-trained sequence model
+- [x] **H. Genome-specific promoter score**: self-trained sequence model
       (labels from enriched vs depleted positions, trained per genome with
       block cross-validation) reported per TSS and optionally used to rescue
-      borderline calls.
+      borderline calls. Result: `call --genome` (labels: strongest third of
+      calls against composition-matched random positions); learns −35/−10
+      in every genome, beats the fixed σ70 score, improves prediction of
+      which weak sites deeper sequencing confirms (benchmarks/README.md).
+      Use for filtering/rescue: decide in the standard mode.
 - [ ] **I. Negative-binomial model across replicates and conditions**
       (DESeq2/edgeR-like), only if F is not enough; adds heavier dependencies.
 
@@ -210,8 +214,9 @@ two of the symbiont datasets, and the result is written into the report.
       the background is reproducible) and the choice of stop.
 - [x] Implement F (replicates); leave-one-out benchmark on the triplicates.
 - [ ] Implement G (peak shape); benchmark base-level precision.
-- [ ] Turn `selftrain.py` into H (`learn` subcommand); benchmark promoter
-      scores per genome, including *Buchnera*.
+- [x] Turn `selftrain.py` into H (`learn` subcommand); benchmark promoter
+      scores per genome, including *Buchnera*. Done as `call --genome`
+      (no separate subcommand); *Buchnera* still to do.
 - [ ] Decide new defaults from sections 5 and 6; keep `--preset ettwiller2016`.
 - [ ] Unit tests for every new statistic (exact values on small inputs).
 - [ ] Update README, benchmark READMEs and the report after each step.

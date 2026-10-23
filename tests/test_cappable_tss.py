@@ -537,5 +537,48 @@ class LocalBackgroundTests(unittest.TestCase):
             self.assertEqual(sorted((r.split("\t")[2], r.split("\t")[1]) for r in rows),
                              [("+", "500"), ("-", "900")])
 
+
+class PromoterModelTests(unittest.TestCase):
+    def test_windows_and_features(self):
+        seq = "AACCGGTTAC"
+        self.assertEqual(ct.upstream_window(seq, "+", 6, 4), "ACCG")
+        self.assertEqual(ct.upstream_window(seq, "-", 6, 4), "GTAA")   # rev. comp. of 7..10 (TTAC)
+        self.assertIsNone(ct.upstream_window(seq, "+", 3, 4))
+        self.assertIsNone(ct.upstream_window("ACGNACGT", "+", 7, 4))
+        f = ct.promoter_features("AC")
+        self.assertEqual(f, [0, 5, 8 + 1])                # A at 0, C at 1, pair AC
+        with tempfile.TemporaryDirectory() as tmp:
+            path = write(tmp, "g.fa", ">c1 desc\nacgt\nAC\n>c2\nGG\n")
+            self.assertEqual(ct.read_fasta(path), {"c1": "ACGTAC", "c2": "GG"})
+
+    def test_learns_a_planted_promoter(self):
+        import random
+        rng = random.Random(3)
+        n = 400000
+        genome = {"g": "".join(rng.choice("AACGTT") for _ in range(n))}   # AT-rich
+        seq = list(genome["g"])
+        tss = []
+        for pos in range(500, n - 500, 400):
+            if rng.random() < 0.5:
+                continue
+            seq[pos - 13:pos - 7] = "TATAAT"       # -12..-7 of a + strand TSS at pos
+            tss.append(("g", "+", pos))
+        genome["g"] = "".join(seq)
+        scores = ct.promoter_scores(genome, tss[::2], tss[1::2] + [("g", "+", p + 200) for _, _, p in tss[1::2]])
+        hit = [scores[k] for k in tss[1::2] if k in scores]
+        miss = [scores[("g", "+", p + 200)] for _, _, p in tss[1::2] if ("g", "+", p + 200) in scores]
+        better = sum(1 for a in hit for b in miss if a > b) / (len(hit) * len(miss))
+        self.assertGreater(better, 0.95)
+
+    def test_call_with_genome_adds_score(self):
+        calls = [ct.TSS("g", p, "+", 100.0 - i * 0.01, float("nan"), float("nan"), 1)
+                 for i, p in enumerate(range(500, 390000, 400))]
+        import random
+        rng = random.Random(4)
+        genome = {"g": "".join(rng.choice("ACGT") for _ in range(400000))}
+        self.assertTrue(ct.add_promoter_scores(calls, genome))
+        self.assertTrue(all(t.promoter_score == t.promoter_score for t in calls))
+        self.assertFalse(ct.add_promoter_scores(calls[:100], genome))
+
 if __name__ == "__main__":
     unittest.main()

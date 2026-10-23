@@ -58,7 +58,8 @@ Other findings from this dataset, which motivate the planned changes to `call`:
   TATAAT-like −10 box, against 33.6% of TSS found by all methods and 2.3% of
   random positions.
 
-`selftrain.py` is a prototype that learns a promoter sequence model from each
+`selftrain.py` (superseded by `cappable_tss.py call --genome`, see
+`../README.md`, approach H) is a prototype that learns a promoter sequence model from each
 genome's own enriched and depleted positions (no external labels):
 
 ```bash

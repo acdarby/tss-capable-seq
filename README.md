@@ -167,6 +167,20 @@ isolated read stacks such as PCR duplicates are called and the q-values are
 too optimistic. The q-values are nominal, because the dispersion is a
 setting rather than an estimate. Details in `benchmarks/README.md`.
 
+#### Promoter score trained on the genome (`--genome`)
+
+With `--genome genome.fa`, each TSS gets a `promoter_score`: the log-odds of a
+sequence model trained on this genome's own data, not on *E. coli*. The
+strongest third of the calls are the positives and composition-matched random
+positions the negatives; the model is a regularised logistic regression on
+the bases −60..−1 and their neighbouring pairs (downstream bases are left out
+so that it cannot learn 5'-ligation preferences). The genome is cut into
+50-kb blocks in two alternating halves and each TSS is scored by the model
+trained on the other half. On the benchmarks the model learns the σ70
+−35 and −10 elements in every genome, recognises weak TSS better than a fixed
+σ70 score, and helps predict which weak sites deeper sequencing confirms
+(`benchmarks/README.md`). It works with any `--method`.
+
 Input notes:
 
 * **BAM**: unmapped, secondary, supplementary and QC-fail reads are

@@ -1,0 +1,12 @@
+dataset	method	n	auroc_model	auroc_fixed	ortho_rise	confirmed	auroc_reads	auroc_both
+walbb	recognition_strong	8537	0.907	0.778				
+walbb	recognition_weak	8292	0.856	0.704				
+walbb	ortho_rise_score_q1	5120			0.291			
+walbb	ortho_rise_score_q2	5120			0.305			
+walbb	ortho_rise_score_q3	5120			0.324			
+walbb	ortho_rise_score_q4	5121			0.394			
+walbb	rescue_0.2	10904	0.663			0.398	0.741	0.788
+walbb	rescue_score_q1	2726				0.199		
+walbb	rescue_score_q2	2726				0.376		
+walbb	rescue_score_q3	2726				0.457		
+walbb	rescue_score_q4	2726				0.561		

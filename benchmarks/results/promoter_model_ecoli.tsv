@@ -1,0 +1,8 @@
+dataset	method	n	auroc_model	auroc_fixed	confirmed	auroc_reads	auroc_both
+ecoli	recognition_strong	14586	0.868	0.765			
+ecoli	recognition_weak	27279	0.754	0.624			
+ecoli	rescue_0.2	42418	0.718		0.233	0.718	0.798
+ecoli	rescue_score_q1	10604			0.086		
+ecoli	rescue_score_q2	10604			0.145		
+ecoli	rescue_score_q3	10604			0.268		
+ecoli	rescue_score_q4	10606			0.435		

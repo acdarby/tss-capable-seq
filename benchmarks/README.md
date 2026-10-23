@@ -11,6 +11,7 @@ Tools to judge TSS-calling methods on real and simulated Cappable-seq data
 | `calibration.py` | Null tests for the statistical calls (false calls where there is nothing to find) |
 | `matched.py` | Compares rankings (RPM, local test, control test) at the same number of TSS on independent evidence |
 | `sensitivity.py` | Settings of the local-background test against call numbers and promoter rates |
+| `promoter_model.py` | Genome-trained promoter score: recognition, rescue at low depth, learned weights |
 | `ettwiller2016/` | Rebuilds the *E. coli* data and compares with the published TSS table |
 | `frontiers2026/` | TSSpredator and ANNOgesic on wAlbB fragment-library data |
 | `tools/` | Download SRA runs, list runs per project, annotate genomes, TSS statistics |
@@ -376,3 +377,60 @@ ranks best everywhere (much better in *E. coli*), the spaced −35 agrees
 stops at about 20,500 sites, after which the core rate falls to the
 background (40%, 32%, 26%, 19% in successive bands of 2,000; background 20%).
 The setting sensitivity is also unchanged (`results/promoter_sensitivity_*`).
+
+## Promoter score trained on each genome (approach H, October 2026)
+
+`call --genome`: positives are the strongest third of the calls,
+negatives composition-matched random positions (three per positive, at most
+4,000 positives); L2-regularised logistic regression on −60..−1 (bases and
+neighbouring pairs); two-fold cross-validation over alternating 50-kb blocks,
+so a TSS is never scored by a model that saw it. Standard library only.
+Results: `results/promoter_model_*.tsv` and `.weights.txt`
+(`promoter_model.py`, local-background calls).
+
+**Recognition** (AUROC against composition-matched random positions;
+fixed = the σ70 score above, combined as 2·core + TATAAT + spaced −35 +
+0.5·extended −10):
+
+| | E. coli | *Salmonella* | wAlbB | wMelPop-CLA |
+|---|---|---|---|---|
+| Strong calls (≥ 20 reads): genome model / fixed | 0.87 / 0.77 | 0.93 / 0.81 | 0.91 / 0.78 | 0.92 / 0.84 |
+| Weak calls (< 10 reads): genome model / fixed | 0.75 / 0.62 | 0.89 / 0.72 | 0.86 / 0.70 | 0.88 / 0.78 |
+
+Trained only on strong TSS, the model also recognises weak ones, and better
+than the fixed score in every genome. A model that also used +1..+5 did
+about as well in a prototype, so the gain is not 5'-ligation preference.
+
+**What it learns.** The strongest positive single-base weights include A at
+−11 and T at −7 in every genome (the bases σ reads; Feklistov & Darst 2011,
+doi:10.1016/j.cell.2011.10.041). Consensus of positive weights:
+
+| | −35 region | −10 region (−15..−5) | −1 |
+|---|---|---|---|
+| E. coli | ttggc at −36..−32 | gggtaAAATTt | C |
+| *Salmonella* | tTgg | gGGTTAAATTTg | C |
+| wAlbB | TtGgc | gGGTAAAATTt | C |
+| wMelPop-CLA | TTGGc | GGGTAAAATTt | C |
+
+**Rescue at low depth.** Reads thinned to 20%; calls and model from the
+thinned data only; weak candidates there (2–5 pooled reads, local maximum)
+are confirmed if the full data call them with ≥ 10 reads (AUROC; logistic
+regression for the combination, 5-fold):
+
+| | E. coli | *Salmonella* | wAlbB | wMelPop-CLA |
+|---|---|---|---|---|
+| Candidates (confirmed) | 42,418 (23%) | 14,766 (51%) | 10,904 (40%) | 2,230 (46%) |
+| Read count | 0.718 | 0.765 | 0.741 | 0.763 |
+| Promoter score | 0.718 | 0.580 | 0.663 | 0.580 |
+| Both | **0.798** | 0.782 | **0.788** | 0.770 |
+| Confirmed, lowest / highest score quarter | 9% / 44% | 41% / 60% | 20% / 56% | 36% / 54% |
+
+**Orthogonal support** (wAlbB, all calls by score quarter): coverage rise in
+the fragment library 29%, 31%, 32%, 39% (background 12%).
+
+So the sequence score carries information that read counts do not, most in
+the deepest-sampled genomes with many weak sites (E. coli, wAlbB): among weak
+candidates, those in the top score quarter are confirmed 3–5 times as often
+as those in the bottom quarter in E. coli and wAlbB. It is reported per TSS;
+using it to filter or rescue calls is left to the standard mode (plan
+section 8).

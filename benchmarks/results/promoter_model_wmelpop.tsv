@@ -1,0 +1,8 @@
+dataset	method	n	auroc_model	auroc_fixed	confirmed	auroc_reads	auroc_both
+wmelpop	recognition_strong	1630	0.924	0.835			
+wmelpop	recognition_weak	3219	0.877	0.777			
+wmelpop	rescue_0.2	2230	0.580		0.463	0.763	0.770
+wmelpop	rescue_score_q1	557			0.364		
+wmelpop	rescue_score_q2	557			0.440		
+wmelpop	rescue_score_q3	557			0.508		
+wmelpop	rescue_score_q4	559			0.538		

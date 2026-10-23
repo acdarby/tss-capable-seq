@@ -198,6 +198,7 @@ class TSS(object):
         self.pvalue = float("nan")         # statistical calling only
         self.qvalue = float("nan")
         self.consistency_p = float("nan")  # replicate agreement (local calling)
+        self.promoter_score = float("nan")  # genome-trained promoter score
         self.classes = set()
         self.genes = defaultdict(list)     # class -> [(gene name, UTR length)]
 
@@ -751,6 +752,190 @@ def call_local(enriched, controls=None, fdr=0.05, min_reads=3, min_replicates=1,
 
 
 # ---------------------------------------------------------------------------
+# Genome-trained promoter score (approach H)
+# ---------------------------------------------------------------------------
+
+PROMOTER_UP = 60          # bases -60..-1; downstream bases are left out so the
+                          # model cannot learn 5'-ligation preferences
+PROMOTER_BLOCK = 50000    # genome blocks for cross-validation
+_BASE = {"A": 0, "C": 1, "G": 2, "T": 3}
+_COMPLEMENT = str.maketrans("ACGTN", "TGCAN")
+
+
+def read_fasta(path):
+    """{sequence name: upper-case sequence} from a (gzipped) FASTA file."""
+    seqs, name, parts = {}, None, []
+    with open_text(path) as handle:
+        for line in handle:
+            if line.startswith(">"):
+                if name is not None:
+                    seqs[name] = "".join(parts)
+                name, parts = line[1:].split()[0], []
+            else:
+                parts.append(line.strip().upper())
+    if name is not None:
+        seqs[name] = "".join(parts)
+    return seqs
+
+
+def upstream_window(seq, strand, pos, length=PROMOTER_UP):
+    """Bases -length..-1 of a 1-based TSS in transcript direction (None if not ACGT)."""
+    if strand == "+":
+        window = seq[max(0, pos - 1 - length):pos - 1]
+    else:
+        window = seq[pos:pos + length][::-1].translate(_COMPLEMENT)
+    if len(window) != length or any(b not in _BASE for b in window):
+        return None
+    return window
+
+
+def promoter_features(window):
+    """Active binary features: the base at each position and each pair of
+    neighbouring bases (so that, e.g., TA steps can be weighted)."""
+    feats = [4 * i + _BASE[b] for i, b in enumerate(window)]
+    offset = 4 * len(window)
+    feats += [offset + 16 * i + 4 * _BASE[a] + _BASE[b]
+              for i, (a, b) in enumerate(zip(window, window[1:]))]
+    return feats
+
+
+class LogisticModel(object):
+    """L2-regularised logistic regression on binary (sparse) features.
+
+    Full-batch gradient descent with Adam steps on the mean log-loss plus
+    l2 / 2 * |w|^2 (the intercept is not penalised).
+    """
+
+    def __init__(self, n_features, l2=1e-3):
+        self.w = [0.0] * n_features
+        self.b = 0.0
+        self.l2 = l2
+
+    def decision(self, feats):
+        return self.b + sum(self.w[j] for j in feats)
+
+    def fit(self, rows, labels, iterations=150, rate=0.05):
+        n, k = len(rows), len(self.w)
+        m, v = [0.0] * (k + 1), [0.0] * (k + 1)
+        beta1, beta2, eps = 0.9, 0.999, 1e-8
+        for it in range(1, iterations + 1):
+            grad = [0.0] * k
+            gb = 0.0
+            for feats, y in zip(rows, labels):
+                z = self.decision(feats)
+                p = 1.0 / (1.0 + math.exp(-z)) if z > -30 else 0.0
+                err = p - y
+                gb += err
+                for j in feats:
+                    grad[j] += err
+            grad = [g / n + self.l2 * w for g, w in zip(grad, self.w)]
+            grad.append(gb / n)
+            corr1, corr2 = 1 - beta1 ** it, 1 - beta2 ** it
+            for j, g in enumerate(grad):
+                m[j] = beta1 * m[j] + (1 - beta1) * g
+                v[j] = beta2 * v[j] + (1 - beta2) * g * g
+                step = rate * (m[j] / corr1) / (math.sqrt(v[j] / corr2) + eps)
+                if j < k:
+                    self.w[j] -= step
+                else:
+                    self.b -= step
+        return self
+
+
+def _block_fold(pos, block=PROMOTER_BLOCK):
+    return (pos // block) % 2
+
+
+def matched_background(genome, sites, per_site=3, n_sample=100000, seed=0):
+    """Random positions whose -60..-1 window has the same AT count as each site.
+
+    AT-rich genomes contain promoter-like words by chance, and the regions
+    around TSS are often more AT-rich than genes; matching composition makes
+    the model learn the promoter rather than base composition.
+    """
+    import random
+    rng = random.Random(seed)
+    names = [n for n in genome if len(genome[n]) > 2 * PROMOTER_UP + 10]
+    weights = [len(genome[n]) for n in names]
+    bins = defaultdict(list)
+    for _ in range(n_sample):
+        name = rng.choices(names, weights)[0]
+        pos = rng.randint(PROMOTER_UP + 2, len(genome[name]) - PROMOTER_UP - 2)
+        strand = rng.choice(STRANDS)
+        window = upstream_window(genome[name], strand, pos)
+        if window:
+            bins[sum(b in "AT" for b in window)].append((name, strand, pos))
+    out = []
+    for seqid, strand, pos in sites:
+        window = upstream_window(genome.get(seqid, ""), strand, pos)
+        if not window:
+            continue
+        at = sum(b in "AT" for b in window)
+        for d in (0, 1, -1, 2, -2, 3, -3):
+            pool = bins.get(at + d)
+            if pool:
+                out += [pool[rng.randrange(len(pool))] for _ in range(per_site)]
+                break
+    return out
+
+
+def promoter_scores(genome, positives, sites, seed=0, max_positives=4000):
+    """Genome-trained promoter score for `sites`, cross-validated by genome block.
+
+    `positives` are confident TSS of this genome (seqid, strand, pos); negatives
+    are composition-matched random positions (three per positive). The genome
+    is cut into 50-kb blocks in two alternating halves; a model trained on one
+    half scores the sites in the other, so no site is scored by a model that
+    saw it. Returns {site: log-odds score} (sites without a clean window are
+    left out).
+    """
+    import random
+    rng = random.Random(seed)
+    positives = list(positives)
+    if len(positives) > max_positives:
+        positives = rng.sample(positives, max_positives)
+    negatives = matched_background(genome, positives, seed=seed)
+    n_features = 4 * PROMOTER_UP + 16 * (PROMOTER_UP - 1)
+    data = []
+    for label, group in ((1, positives), (0, negatives)):
+        for seqid, strand, pos in group:
+            window = upstream_window(genome.get(seqid, ""), strand, pos)
+            if window:
+                data.append((_block_fold(pos), promoter_features(window), label))
+    models = {}
+    for fold in (0, 1):
+        rows = [(f, y) for blk, f, y in data if blk != fold]
+        models[fold] = LogisticModel(n_features).fit([f for f, _ in rows], [y for _, y in rows])
+    scores = {}
+    for seqid, strand, pos in sites:
+        window = upstream_window(genome.get(seqid, ""), strand, pos)
+        if window:
+            scores[(seqid, strand, pos)] = models[_block_fold(pos)].decision(
+                promoter_features(window))
+    return scores
+
+
+def add_promoter_scores(calls, genome, strong_share=1 / 3.0, min_positives=200, stream=None):
+    """Score each call (tss.promoter_score) with a model trained on the
+    strongest `strong_share` of the calls themselves (by enriched RPM)."""
+    ranked = sorted(calls, key=lambda t: -t.enriched_rpm)
+    positives = [t.key for t in ranked[:int(len(ranked) * strong_share)]
+                 if t.seqid in genome]
+    if len(positives) < min_positives:
+        if stream is not None:
+            stream.write("Promoter score skipped: %d confident TSS, need %d\n"
+                         % (len(positives), min_positives))
+        return False
+    scores = promoter_scores(genome, positives, [t.key for t in calls])
+    for t in calls:
+        t.promoter_score = scores.get(t.key, float("nan"))
+    if stream is not None:
+        stream.write("Promoter score: trained on %d of this genome's strongest TSS "
+                     "(cross-validated by 50-kb blocks)\n" % min(len(positives), 4000))
+    return True
+
+
+# ---------------------------------------------------------------------------
 # Annotation and classification
 # ---------------------------------------------------------------------------
 
@@ -926,6 +1111,8 @@ def write_gff(tss_list, path, source="ANNOgesic-Cappable"):
                 attrs += ["pvalue=%.3g" % tss.pvalue, "qvalue=%.3g" % tss.qvalue]
             if tss.consistency_p == tss.consistency_p:
                 attrs.append("consistency_p=%.3g" % tss.consistency_p)
+            if tss.promoter_score == tss.promoter_score:
+                attrs.append("promoter_score=%.2f" % tss.promoter_score)
             out.write("\t".join([tss.seqid, source, "TSS", str(tss.pos),
                                  str(tss.pos), _fmt(tss.enriched_rpm),
                                  tss.strand, ".", ";".join(attrs)]) + "\n")
@@ -934,7 +1121,7 @@ def write_gff(tss_list, path, source="ANNOgesic-Cappable"):
 def write_table(tss_list, path):
     header = ["seqid", "position", "strand", "type", "associated_gene",
               "UTR_length", "enriched_rpm", "control_rpm", "log2_enrichment",
-              "replicates", "pvalue", "qvalue", "consistency_p"]
+              "replicates", "pvalue", "qvalue", "consistency_p", "promoter_score"]
     with open(path, "w") as out:
         out.write("\t".join(header) + "\n")
         for tss in tss_list:
@@ -943,6 +1130,7 @@ def write_table(tss_list, path):
                 _gene_text(tss), _utr_text(tss), _fmt(tss.enriched_rpm),
                 _fmt(tss.control_rpm), _fmt(tss.log2fc), str(tss.replicates),
                 _fmt_p(tss.pvalue), _fmt_p(tss.qvalue), _fmt_p(tss.consistency_p),
+                _fmt(tss.promoter_score),
             ]) + "\n")
 
 
@@ -1304,6 +1492,10 @@ def build_parser():
     call = sub.add_parser("call", help="Call and classify TSS")
     add_inputs(call)
     call.add_argument("--annotation", help="GFF3 genome annotation")
+    call.add_argument("--genome",
+                      help="Genome FASTA: adds a promoter score per TSS from a sequence "
+                           "model trained on this genome's strongest TSS (-60..-1, "
+                           "cross-validated by 50-kb genome blocks)")
     call.add_argument("--feature-types", default="gene",
                       help="Comma-separated GFF feature types used as genes "
                            "(default: gene; CDS is a common alternative)")
@@ -1511,6 +1703,8 @@ def main(argv=None):
                                control_floor=settings["control_floor"],
                                rpm_decimals=settings["rpm_decimals"])
     calls = cluster_tss(calls, settings["cluster_distance"])
+    if args.genome:
+        add_promoter_scores(calls, read_fasta(args.genome), stream=sys.stderr)
     if genes is not None:
         classify(calls, genes, args.utr_length, args.antisense_distance)
     write_gff(calls, args.out_prefix + ".gff")
