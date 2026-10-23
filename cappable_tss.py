@@ -199,6 +199,7 @@ class TSS(object):
         self.qvalue = float("nan")
         self.consistency_p = float("nan")  # replicate agreement (local calling)
         self.promoter_score = float("nan")  # genome-trained promoter score
+        self.peak_ratio = float("nan")      # RPM / strongest call upstream (mark_shoulders)
         self.classes = set()
         self.genes = defaultdict(list)     # class -> [(gene name, UTR length)]
 
@@ -310,6 +311,37 @@ def cluster_tss(calls, distance=5):
     if cluster:
         merged.append(max(cluster, key=lambda t: t.enriched_rpm))
     return merged
+
+
+def mark_shoulders(calls, window=30):
+    """Set tss.peak_ratio for each call: its enriched RPM divided by that of
+    the strongest call on the same strand within `window` nt upstream (in the
+    direction of transcription), or 1.0 if there is none or it is weaker.
+
+    A low ratio means the call sits in the downstream shoulder of a stronger
+    TSS: reads from just after the start, or degradation of that transcript.
+    """
+    by_strand = defaultdict(list)
+    for tss in calls:
+        by_strand[(tss.seqid, tss.strand)].append(tss)
+    for (_, strand), group in by_strand.items():
+        group.sort(key=lambda t: t.pos)
+        positions = [t.pos for t in group]
+        for i, tss in enumerate(group):
+            if strand == "+":
+                lo, hi = bisect.bisect_left(positions, tss.pos - window), i
+            else:
+                lo, hi = i + 1, bisect.bisect_right(positions, tss.pos + window)
+            top = max((group[j].enriched_rpm for j in range(lo, hi)), default=0.0)
+            tss.peak_ratio = (min(1.0, tss.enriched_rpm / top)
+                              if top > tss.enriched_rpm else 1.0)
+    return calls
+
+
+def remove_shoulders(calls, window=30, ratio=0.1):
+    """Calls whose peak_ratio (mark_shoulders) is at least `ratio`."""
+    mark_shoulders(calls, window)
+    return [t for t in calls if t.peak_ratio >= ratio]
 
 
 # ---------------------------------------------------------------------------
@@ -1113,6 +1145,8 @@ def write_gff(tss_list, path, source="ANNOgesic-Cappable"):
                 attrs.append("consistency_p=%.3g" % tss.consistency_p)
             if tss.promoter_score == tss.promoter_score:
                 attrs.append("promoter_score=%.2f" % tss.promoter_score)
+            if tss.peak_ratio == tss.peak_ratio:
+                attrs.append("peak_ratio=%.3g" % tss.peak_ratio)
             out.write("\t".join([tss.seqid, source, "TSS", str(tss.pos),
                                  str(tss.pos), _fmt(tss.enriched_rpm),
                                  tss.strand, ".", ";".join(attrs)]) + "\n")
@@ -1121,7 +1155,8 @@ def write_gff(tss_list, path, source="ANNOgesic-Cappable"):
 def write_table(tss_list, path):
     header = ["seqid", "position", "strand", "type", "associated_gene",
               "UTR_length", "enriched_rpm", "control_rpm", "log2_enrichment",
-              "replicates", "pvalue", "qvalue", "consistency_p", "promoter_score"]
+              "replicates", "pvalue", "qvalue", "consistency_p", "promoter_score",
+              "peak_ratio"]
     with open(path, "w") as out:
         out.write("\t".join(header) + "\n")
         for tss in tss_list:
@@ -1130,7 +1165,7 @@ def write_table(tss_list, path):
                 _gene_text(tss), _utr_text(tss), _fmt(tss.enriched_rpm),
                 _fmt(tss.control_rpm), _fmt(tss.log2fc), str(tss.replicates),
                 _fmt_p(tss.pvalue), _fmt_p(tss.qvalue), _fmt_p(tss.consistency_p),
-                _fmt(tss.promoter_score),
+                _fmt(tss.promoter_score), _fmt(tss.peak_ratio),
             ]) + "\n")
 
 
@@ -1492,6 +1527,12 @@ def build_parser():
     call = sub.add_parser("call", help="Call and classify TSS")
     add_inputs(call)
     call.add_argument("--annotation", help="GFF3 genome annotation")
+    call.add_argument("--shoulder-ratio", type=float, default=0.0,
+                      help="Drop a TSS with less than this share of the RPM of a "
+                           "stronger TSS on the same strand within --shoulder-window nt "
+                           "upstream (its downstream shoulder); 0 keeps all (default 0)")
+    call.add_argument("--shoulder-window", type=int, default=30,
+                      help="Window for --shoulder-ratio, nt upstream (default 30)")
     call.add_argument("--genome",
                       help="Genome FASTA: adds a promoter score per TSS from a sequence "
                            "model trained on this genome's strongest TSS (-60..-1, "
@@ -1703,6 +1744,11 @@ def main(argv=None):
                                control_floor=settings["control_floor"],
                                rpm_decimals=settings["rpm_decimals"])
     calls = cluster_tss(calls, settings["cluster_distance"])
+    mark_shoulders(calls, args.shoulder_window)
+    if args.shoulder_ratio > 0:
+        before = len(calls)
+        calls = [t for t in calls if t.peak_ratio >= args.shoulder_ratio]
+        sys.stderr.write("Shoulders removed: %d\n" % (before - len(calls)))
     if args.genome:
         add_promoter_scores(calls, read_fasta(args.genome), stream=sys.stderr)
     if genes is not None:

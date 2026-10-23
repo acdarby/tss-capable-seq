@@ -580,5 +580,27 @@ class PromoterModelTests(unittest.TestCase):
         self.assertTrue(all(t.promoter_score == t.promoter_score for t in calls))
         self.assertFalse(ct.add_promoter_scores(calls[:100], genome))
 
+
+class ShoulderTests(unittest.TestCase):
+    def make(self, pos, strand, rpm):
+        return ct.TSS("c", pos, strand, rpm, float("nan"), float("nan"), 1)
+
+    def test_mark_and_remove(self):
+        calls = [self.make(100, "+", 100.0), self.make(120, "+", 5.0),   # shoulder of 100
+                 self.make(80, "+", 5.0),                                  # upstream: not a shoulder
+                 self.make(200, "+", 5.0),                                 # too far
+                 self.make(500, "-", 100.0), self.make(480, "-", 5.0),   # shoulder on minus strand
+                 self.make(520, "-", 5.0)]                                 # upstream on minus strand
+        ct.mark_shoulders(calls, window=30)
+        ratio = {(t.strand, t.pos): t.peak_ratio for t in calls}
+        self.assertAlmostEqual(ratio[("+", 120)], 0.05)
+        self.assertAlmostEqual(ratio[("-", 480)], 0.05)
+        for key in (("+", 100), ("+", 80), ("+", 200), ("-", 500), ("-", 520)):
+            self.assertEqual(ratio[key], 1.0, key)
+        kept = ct.remove_shoulders(calls, window=30, ratio=0.1)
+        self.assertEqual(sorted((t.strand, t.pos) for t in kept),
+                         [("+", 80), ("+", 100), ("+", 200), ("-", 500), ("-", 520)])
+        self.assertEqual(len(ct.remove_shoulders(calls, window=30, ratio=0.01)), 7)
+
 if __name__ == "__main__":
     unittest.main()

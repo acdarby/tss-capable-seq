@@ -167,6 +167,16 @@ isolated read stacks such as PCR duplicates are called and the q-values are
 too optimistic. The q-values are nominal, because the dispersion is a
 setting rather than an estimate. Details in `benchmarks/README.md`.
 
+#### Shoulders (`peak_ratio`, `--shoulder-ratio`)
+
+Each TSS gets `peak_ratio`: its RPM divided by that of the strongest TSS on
+the same strand within `--shoulder-window` (30) nt upstream, or 1 if there
+is none. A low ratio marks a call in the downstream shoulder of a stronger
+TSS. `--shoulder-ratio 0.1` drops calls below that ratio. It is off by
+default: in *E. coli* such calls have background-level promoter evidence,
+but in *Salmonella* and *Wolbachia* most carry their own promoter (tandem
+promoters), so dropping them loses real TSS (`benchmarks/README.md`).
+
 #### Promoter score trained on the genome (`--genome`)
 
 With `--genome genome.fa`, each TSS gets a `promoter_score`: the log-odds of a

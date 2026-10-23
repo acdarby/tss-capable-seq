@@ -108,9 +108,11 @@ Each one is an option that stays off by default until it passes sections 5 and 6
       Result: Fisher is invalid for the local test (background repeats
       between replicates); pooling, reads in one replicate, and a per-TSS
       consistency p-value instead (benchmarks/README.md).
-- [ ] **G. Peak shape**: local-peak ratio and cluster spread, so the
+- [x] **G. Peak shape**: local-peak ratio and cluster spread, so the
       strongest position of an imprecise promoter is reported once and weak
-      shoulders are not called separately.
+      shoulders are not called separately. Result: positions already precise;
+      `peak_ratio` per TSS and `--shoulder-ratio` (off): shoulders are
+      background-like in E. coli but mostly promoters elsewhere.
 - [x] **H. Genome-specific promoter score**: self-trained sequence model
       (labels from enriched vs depleted positions, trained per genome with
       block cross-validation) reported per TSS and optionally used to rescue
@@ -213,7 +215,7 @@ two of the symbiont datasets, and the result is written into the report.
       Open: the real-data null for D (no clean null exists in 5'-end data:
       the background is reproducible) and the choice of stop.
 - [x] Implement F (replicates); leave-one-out benchmark on the triplicates.
-- [ ] Implement G (peak shape); benchmark base-level precision.
+- [x] Implement G (peak shape); benchmark base-level precision.
 - [x] Turn `selftrain.py` into H (`learn` subcommand); benchmark promoter
       scores per genome, including *Buchnera*. Done as `call --genome`
       (no separate subcommand); *Buchnera* still to do.

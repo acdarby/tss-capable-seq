@@ -12,6 +12,7 @@ Tools to judge TSS-calling methods on real and simulated Cappable-seq data
 | `matched.py` | Compares rankings (RPM, local test, control test) at the same number of TSS on independent evidence |
 | `sensitivity.py` | Settings of the local-background test against call numbers and promoter rates |
 | `promoter_model.py` | Genome-trained promoter score: recognition, rescue at low depth, learned weights |
+| `shoulders.py` | Calls in the downstream shoulder of a stronger TSS: evidence for removed and kept calls |
 | `ettwiller2016/` | Rebuilds the *E. coli* data and compares with the published TSS table |
 | `frontiers2026/` | TSSpredator and ANNOgesic on wAlbB fragment-library data |
 | `tools/` | Download SRA runs, list runs per project, annotate genomes, TSS statistics |
@@ -434,3 +435,35 @@ candidates, those in the top score quarter are confirmed 3–5 times as often
 as those in the bottom quarter in E. coli and wAlbB. It is reported per TSS;
 using it to filter or rescue calls is left to the standard mode (plan
 section 8).
+
+## Peak shape (approach G, October 2026)
+
+**Position.** The reported position of a cluster (the strongest base) is
+already precise: it is a purine 81–88% of the time against 28–49% one base
+either side, and the −10 core starts at −12/−11 as expected, for
+`ettwiller2016` and the local test on *E. coli* and wAlbB. Nothing to change.
+
+**Shoulders.** Calls 7–30 nt downstream of a much stronger call on the same
+strand (`cappable_tss.mark_shoulders`; `peak_ratio` = RPM / RPM of the
+strongest call within 30 nt upstream). Removed calls compared with kept
+calls of the same RPM (`shoulders.py`, `results/shoulders_*.tsv`; window
+30 nt, ratio 0.1; −10 core rate):
+
+| | Removed | Removed | Same-RPM kept | Background | Positive genome score, removed / same-RPM |
+|---|---|---|---|---|---|
+| E. coli `ettwiller2016` | 732 (4.4%) | 13% | 36% | 10% | 16% / 33% |
+| E. coli local | 1,752 (3.4%) | 13% | 38% | 8% | 21% / 54% |
+| wAlbB local | 698 (3.4%) | 44% | 44% | 20% | 44% / 59% |
+| *Salmonella* `ettwiller2016` | 159 (1.5%) | 55% | 66% | 8% | 54% / 64% |
+| *Salmonella* local | 1,034 (2.6%) | 40% | 48% | 8% | 50% / 67% |
+| wMelPop-CLA `ettwiller2016` | 42 (2.0%) | 57% | 74% | 33% | 26% / 50% |
+
+In *E. coli*, shoulders have background-level promoter evidence and removing
+them costs only Table S1 sites that the same pipeline called (exact-base
+recall 0.959 → 0.920). In *Salmonella* and both *Wolbachia* strains most
+shoulders have promoters (tandem promoters); removing them would lose real
+TSS. The data do not show why *E. coli* differs. Shoulder removal is
+therefore an option (`--shoulder-ratio`, off by default), and `peak_ratio`
+is reported for every TSS. The coverage-rise check cannot judge shoulders
+(a site just downstream of a strong TSS always sees rising coverage) and is
+not used here.
