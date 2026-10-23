@@ -1,0 +1,89 @@
+# Benchmark datasets for cappable_tss.py.
+#
+# File paths are relative to the data directory given to harness.py
+# (--data-dir); `sources` records where each file comes from so the data
+# directory can be rebuilt (benchmarks/tools/fetch_sra.sh, NCBI Datasets).
+# Only 5'-end Cappable-seq libraries are listed as `enriched`/`control`;
+# fragment-library data are listed as `orthogonal` evidence.
+
+[[dataset]]
+name = "ecoli"
+organism = "Escherichia coli K-12 MG1655"
+study = "Ettwiller et al. 2016, BMC Genomics 17:199, doi:10.1186/s12864-016-2539-z"
+genome = "data/ecoli/genome.fa"
+annotation = "genomes/U00096.2.gff3"
+feature_types = ["CDS", "rRNA", "tRNA"]
+chromosome = "U00096.2"
+enriched = ["data/ecoli/ERR930221.bam"]
+technical_replicate = "data/ecoli/ERR930222.bam"
+control = ["data/ecoli/ERR930223.bam"]
+reference = "ref/ettwiller_TSS.gtf"
+min_mapq = 0
+mate = 1
+[dataset.sources]
+reads = ["ERR930221 (enriched)", "ERR930222 (technical replicate)", "ERR930223 (non-enriched control)"]
+bioproject = "PRJEB9717"
+genome = "U00096.2 (AWS iGenomes E. coli K-12 MG1655 NCBI 2001-10-15)"
+annotation = "GenBank U00096.2"
+reference = "Table S1 of Ettwiller et al. 2016 (12864_2016_2539_MOESM1_ESM.gtf)"
+library = "5'-ligation (NEBNext small RNA), single-end 100 bp"
+
+[[dataset]]
+name = "salmonella"
+organism = "Salmonella enterica Typhimurium SL1344"
+study = "PRJEB58986 (University of Birmingham)"
+genome = "genomes/SL1344.fa"
+annotation = "genomes/GCA_000210855.2/ncbi_dataset/data/GCA_000210855.2/genomic.gff"
+feature_types = ["CDS", "rRNA", "tRNA", "ncRNA"]
+chromosome = "FQ312003.1"
+enriched = ["data/salmonella/SL1344_cappable_rep1.bam", "data/salmonella/SL1344_cappable_rep2.bam"]
+control = []
+min_mapq = 0
+mate = 1
+[dataset.sources]
+reads = ["ERR10782706", "ERR10782707"]
+bioproject = "PRJEB58986"
+genome = "GCA_000210855.2"
+library = "5'-end Cappable-seq, single-end 75 bp"
+
+[[dataset]]
+name = "walbb"
+organism = "Wolbachia wAlbB in Aedes albopictus Aa23 cells"
+study = "Suliman et al. 2025, Microbial Genomics 11(10), doi:10.1099/mgen.0.001542"
+genome = "genomes/wAlbB_mito.fa"
+annotation = "genomes/GCA_004171285.1/ncbi_dataset/data/GCA_004171285.1/genomic.gff"
+feature_types = ["CDS", "rRNA", "tRNA", "ncRNA"]
+chromosome = "CP031221.1"
+enriched = ["data/wolbachia_suliman/wAlbB_28control_1.bam", "data/wolbachia_suliman/wAlbB_28control_2.bam", "data/wolbachia_suliman/wAlbB_28control_3.bam"]
+control = []
+min_mapq = 20
+mate = 1
+# Same strain and cell line, stranded random-primed RNA-seq of captured
+# primary transcripts (Frontiers in Microbiology 2026,
+# doi:10.3389/fmicb.2026.1860204); read 2 is the sense read.
+orthogonal = "data/wolbachia_1392518/wAlbB_xrn1exp_CappSeq.bam"
+orthogonal_mate = 2
+[dataset.sources]
+reads = ["SRR30164326", "SRR30164325", "SRR30164324"]
+bioproject = "PRJNA1145481"
+genome = "GCA_004171285.1 + Aedes albopictus mitochondrion NC_006817.1"
+orthogonal = "SRR41042961 (PRJNA1392518)"
+library = "5'-end Cappable-seq (NEBNext small RNA), single-end 150 bp"
+
+[[dataset]]
+name = "wmelpop"
+organism = "Wolbachia wMelPop-CLA in Aedes albopictus RML-12 cells"
+study = "Suliman et al. 2025, Microbial Genomics 11(10), doi:10.1099/mgen.0.001542"
+genome = "genomes/wMel_mito.fa"
+annotation = "genomes/GCA_000008025.1/ncbi_dataset/data/GCA_000008025.1/genomic.gff"
+feature_types = ["CDS", "rRNA", "tRNA", "ncRNA"]
+chromosome = "AE017196.1"
+enriched = ["data/wolbachia_suliman_wmel/wMelPopCLA_28C_48hr_1.bam", "data/wolbachia_suliman_wmel/wMelPopCLA_28C_48hr_2.bam", "data/wolbachia_suliman_wmel/wMelPopCLA_28C_48hr_3.bam"]
+control = []
+min_mapq = 20
+mate = 1
+[dataset.sources]
+reads = ["SRR30164290", "SRR30164289", "SRR30164288"]
+bioproject = "PRJNA1145481"
+genome = "GCA_000008025.1 (wMel, used as reference for wMelPop-CLA) + NC_006817.1"
+library = "5'-end Cappable-seq (NEBNext small RNA), single-end 150 bp"
