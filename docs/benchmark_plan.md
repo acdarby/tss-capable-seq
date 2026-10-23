@@ -243,7 +243,10 @@ The end products of this plan:
         no method separates them from TSS in the simulation (D).
       - Depth: the RPM cut-off calls more noise at lower depth; the
         statistical tests lose weak TSS gradually (C, D).
-- [ ] **One tool with a standard mode and a development mode.**
+- [x] **One tool with a standard mode and a development mode.**
+      Done: `call --mode standard` (default; design from replicates,
+      control and library check; confidence tiers validated in
+      benchmarks/README.md) and `--mode dev` (all methods and settings).
       - Standard mode: `call --design auto` (or a named design) chooses the
         method and settings from the inputs (replicates, control, library
         check) using the benchmark results, and reports per-TSS confidence

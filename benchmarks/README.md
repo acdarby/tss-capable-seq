@@ -13,6 +13,7 @@ Tools to judge TSS-calling methods on real and simulated Cappable-seq data
 | `sensitivity.py` | Settings of the local-background test against call numbers and promoter rates |
 | `promoter_model.py` | Genome-trained promoter score: recognition, rescue at low depth, learned weights |
 | `shoulders.py` | Calls in the downstream shoulder of a stronger TSS: evidence for removed and kept calls |
+| `standard_mode.py` | Validates the standard mode and its confidence tiers |
 | `ettwiller2016/` | Rebuilds the *E. coli* data and compares with the published TSS table |
 | `frontiers2026/` | TSSpredator and ANNOgesic on wAlbB fragment-library data |
 | `tools/` | Download SRA runs, list runs per project, annotate genomes, TSS statistics |
@@ -467,3 +468,37 @@ therefore an option (`--shoulder-ratio`, off by default), and `peak_ratio`
 is reported for every TSS. The coverage-rise check cannot judge shoulders
 (a site just downstream of a strong TSS always sees rising coverage) and is
 not used here.
+
+## Standard mode (October 2026)
+
+`call --mode standard` (the default) chooses from the design
+(`cappable_tss.choose_design`): the local-background test with ≥ 2 enriched
+replicates, the Ettwiller cut-offs with one library; a control removes
+depleted sites; enriched libraries failing the library check stop the run.
+Each TSS gets a confidence (`assign_confidence`): **high** = ≥ 10 reads,
+positive genome-trained promoter score (with `--genome`), consistent
+replicates (consistency_p ≥ 0.001) and not a shoulder (peak_ratio ≥ 0.1);
+**medium** = ≥ 10 reads or a positive score, and consistent; **low** = the
+rest. The thresholds come from the earlier sections (10 reads: weak sites
+were usually confirmed above it; 0.1: shoulder analysis).
+
+Validation (`standard_mode.py`, `results/standard_mode_*.tsv`, with
+`--genome`): *confirmed* = share of the TSS called from 20% of the reads
+(in that tier) that the full data call with ≥ 10 reads; −10 core rate
+(partly circular, as the tiers use the promoter score); coverage rise in the
+fragment library (wAlbB):
+
+| | Design | TSS: high / medium / low | Confirmed: high / medium / low | −10 core: high / medium / low (background) |
+|---|---|---|---|---|
+| E. coli | one library + control: cut-offs | 8,962 / 7,677 / 0 | 99% / 75% / 47% | 68% / 28% / – (7%) |
+| *Salmonella* | 2 replicates: local | 13,831 / 17,752 / 8,590 | 99.5% / 89% / 79% | 67% / 51% / 36% (7%) |
+| wAlbB | 3 replicates: local | 7,522 / 8,619 / 4,344 | 99% / 89% / 79% | 67% / 54% / 45% (17%) |
+| wMelPop-CLA | 3 replicates: local | 1,780 / 2,543 / 1,456 | 100% / 88% / 79% | 73% / 65% / 60% (18%) |
+
+wAlbB coverage rise: high 42%, medium 31%, low 22% (background 12–14%).
+The tiers are ordered on every measure. In E. coli no full-data call is low
+because the 1.5-RPM cut-off already implies ≥ 10 reads there. Without
+`--genome` the tiers separate less (wAlbB: 11,768 high with a 62% −10 core
+rate, 351 medium, 8,366 low), so `--genome` is recommended. "Low" is
+relative: in the replicated datasets most low-confidence TSS are still
+confirmed by deeper data.

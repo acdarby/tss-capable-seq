@@ -1,0 +1,5 @@
+dataset	method	n_tss	share	core10	core10_bg	n_thinned	confirmed
+wmelpop	local_high	1780	0.308	0.732	0.183	643	1.000
+wmelpop	local_medium	2543	0.440	0.648	0.175	1055	0.878
+wmelpop	local_low	1456	0.252	0.595	0.175	595	0.788
+wmelpop	local_all	5779	1.000	0.661	0.179	2293	0.889

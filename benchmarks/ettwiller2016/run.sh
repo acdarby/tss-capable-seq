@@ -49,7 +49,7 @@ done
 
 # 3. TSS calls with the published settings, and comparison with Table S1.
 sed 's/^gi|48994873|gb|U00096.2|/U00096.2/' "$table_s1" > table_s1.gtf
-"${PYTHON:-python3}" "$repo/cappable_tss.py" call --preset ettwiller2016 \
+"${PYTHON:-python3}" "$repo/cappable_tss.py" call --mode dev --preset ettwiller2016 \
   --enriched enriched.bam --control control.bam \
   --annotation annotation.gff --feature-types CDS,rRNA,tRNA --out-prefix tss_ettwiller2016
 "${PYTHON:-python3}" "$repo/cappable_tss.py" compare --query tss_ettwiller2016.gff --reference table_s1.gtf \

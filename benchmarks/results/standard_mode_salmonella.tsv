@@ -1,0 +1,5 @@
+dataset	method	n_tss	share	core10	core10_bg	n_thinned	confirmed
+salmonella	local_high	13831	0.344	0.672	0.076	5759	0.995
+salmonella	local_medium	17752	0.442	0.510	0.071	8680	0.889
+salmonella	local_low	8590	0.214	0.357	0.074	3704	0.793
+salmonella	local_all	40173	1.000	0.533	0.075	18143	0.903

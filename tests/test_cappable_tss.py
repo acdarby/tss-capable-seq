@@ -125,7 +125,10 @@ class CallingTests(unittest.TestCase):
         self.assertIn("type=Primary", lines[0])
         self.assertIn("associated_gene=geneA", lines[0])
         self.assertIn("UTR_length=Primary_50", lines[0])
+        self.assertIn("confidence=high", lines[0])            # standard mode, 50 reads
         self.assertTrue(os.path.exists(prefix + ".tsv"))
+        with open(prefix + ".design.txt") as handle:
+            self.assertIn("ettwiller2016", handle.read())     # one library
 
 
 class EttwillerPresetTests(unittest.TestCase):
@@ -253,11 +256,14 @@ class LibraryQcTests(unittest.TestCase):
             frag = write(d, "frag.bed", "".join(
                 "chr\t%d\t%d\tr\t0\t+\n" % (p, p + 50) for p in range(100, 3000) for _ in range(2)))
             prefix = os.path.join(d, "out")
-            self.assertEqual(ct.main(["call", "--enriched", frag, "--out-prefix", prefix]), 0)
+            self.assertEqual(ct.main(["call", "--mode", "dev", "--enriched", frag,
+                                      "--out-prefix", prefix]), 0)
             with open(prefix + ".qc.tsv") as handle:
                 self.assertIn("fragment", handle.read())
-            self.assertEqual(ct.main(["call", "--enriched", frag, "--out-prefix", prefix,
-                                      "--strict-qc"]), 2)
+            self.assertEqual(ct.main(["call", "--mode", "dev", "--enriched", frag,
+                                      "--out-prefix", prefix, "--strict-qc"]), 2)
+            # Standard mode refuses fragment libraries.
+            self.assertEqual(ct.main(["call", "--enriched", frag, "--out-prefix", prefix]), 2)
             self.assertEqual(ct.main(["qc", "--enriched", frag]), 2)
 
 
@@ -530,7 +536,7 @@ class LocalBackgroundTests(unittest.TestCase):
                 text += "".join(bed_reads("chr", p, "+", 1) for p in range(100, 1000, 37))
                 beds.append(write(tmp, "rep%d.bed" % rep, text))
             prefix = os.path.join(tmp, "out", "TSS")
-            self.assertEqual(ct.main(["call", "--method", "local", "--enriched"] + beds
+            self.assertEqual(ct.main(["call", "--mode", "dev", "--method", "local", "--enriched"] + beds
                                      + ["--out-prefix", prefix]), 0)
             with open(prefix + ".tsv") as handle:
                 rows = handle.read().splitlines()[1:]
@@ -601,6 +607,49 @@ class ShoulderTests(unittest.TestCase):
         self.assertEqual(sorted((t.strand, t.pos) for t in kept),
                          [("+", 80), ("+", 100), ("+", 200), ("-", 500), ("-", 520)])
         self.assertEqual(len(ct.remove_shoulders(calls, window=30, ratio=0.01)), 7)
+
+
+class StandardModeTests(unittest.TestCase):
+    def test_choose_design(self):
+        design, reasons = ct.choose_design(3, 0)
+        self.assertEqual(design["method"], "local")
+        self.assertTrue(any("no control" in r for r in reasons))
+        design, reasons = ct.choose_design(1, 1)
+        self.assertEqual(design, dict(method="cutoff", preset="ettwiller2016"))
+        self.assertTrue(any("replicates are recommended" in r for r in reasons))
+
+    def test_confidence(self):
+        def tss(reads, score=float("nan"), cons=float("nan"), ratio=1.0):
+            t = ct.TSS("c", 1, "+", 1.0, 0.0, 0.0, 1)
+            t.reads, t.promoter_score, t.consistency_p, t.peak_ratio = reads, score, cons, ratio
+            return t
+        calls = [tss(50), tss(50, score=1.0), tss(50, score=-1.0), tss(3, score=1.0),
+                 tss(3, score=-1.0), tss(50, cons=1e-6), tss(50, ratio=0.05)]
+        ct.assign_confidence(calls)
+        self.assertEqual([t.confidence for t in calls],
+                         ["high", "high", "medium", "medium", "low", "low", "medium"])
+
+    def test_standard_rejects_dev_options_and_uses_local_with_replicates(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            beds = []
+            for rep in range(2):
+                text = bed_reads("chr", 500, "+", 20) + bed_reads("chr", 900, "-", 12)
+                text += "".join(bed_reads("chr", p, "+", 1) for p in range(100, 1000, 37))
+                beds.append(write(tmp, "rep%d.bed" % rep, text))
+            prefix = os.path.join(tmp, "TSS")
+            self.assertEqual(ct.main(["call", "--enriched"] + beds + ["--out-prefix", prefix,
+                                      "--method", "local"]), 1)
+            self.assertEqual(ct.main(["call", "--enriched"] + beds + ["--out-prefix", prefix,
+                                      "--min-rpm=2"]), 1)
+            self.assertEqual(ct.main(["call", "--enriched"] + beds + ["--out-prefix", prefix]), 0)
+            with open(prefix + ".design.txt") as handle:
+                text = handle.read()
+            self.assertIn("method=local", text)
+            self.assertIn("no control", text)
+            with open(prefix + ".tsv") as handle:
+                rows = [r.split("\t") for r in handle.read().splitlines()[1:]]
+            self.assertEqual(sorted((r[2], r[1], r[-1]) for r in rows),
+                             [("+", "500", "high"), ("-", "900", "high")])
 
 if __name__ == "__main__":
     unittest.main()

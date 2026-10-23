@@ -1,0 +1,5 @@
+dataset	method	n_tss	share	core10	core10_bg	n_thinned	confirmed	ortho_rise	ortho_rise_bg
+walbb_nogenome	local_high	11768	0.574	0.618	0.175	5246	0.989	0.394	0.117
+walbb_nogenome	local_medium	351	0.017	0.470	0.194	110	0.882	0.758	0.034
+walbb_nogenome	local_low	8366	0.408	0.497	0.159	5567	0.819	0.218	0.143
+walbb_nogenome	local_all	20485	1.000	0.566	0.168	10923	0.901	0.328	0.126

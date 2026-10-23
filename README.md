@@ -29,6 +29,61 @@ step.
 
 ### `call`: find and classify TSS
 
+`call` has two modes:
+
+* **standard** (the default) chooses the method and settings from the
+  experimental design and gives each TSS a confidence. Use it unless you
+  are developing or comparing methods.
+* **dev** (`--mode dev`) exposes every method and setting (options marked
+  `[dev]` in `call -h`), as described under "Development mode" below.
+
+#### Standard mode
+
+```bash
+python cappable_tss.py call \
+    --enriched rep1.bam rep2.bam rep3.bam \
+    --control  ctl.bam \
+    --annotation genome.gff --feature-types CDS \
+    --genome genome.fa \
+    --out-prefix results/TSS
+```
+
+1. **Library check.** Enriched libraries that do not look like 5'-end data
+   (fragment, random-primed libraries, where read starts do not mark TSS)
+   stop the run with an explanation.
+2. **Method from the design** (benchmarks in `benchmarks/README.md`):
+   * two or more enriched replicates: the test against the local
+     background (pooled replicates, reads in at least one replicate, FDR
+     5%), which ranked TSS best and stopped where calls stopped looking
+     like promoters;
+   * one enriched library: the published Cappable-seq cut-offs
+     (Ettwiller et al. 2016), because without replicates the statistical
+     test also calls isolated read stacks;
+   * with a control, sites less abundant after enrichment than in the
+     control (processed RNA ends) are removed. Without one they cannot be,
+     and the run says so.
+3. Calls within 6 nt are merged; each TSS gets `peak_ratio` (shoulders
+   are reported, not removed), the promoter score with `--genome`, gene
+   classes with `--annotation`, and a **confidence**:
+   * **high**: ≥ 10 reads, positive promoter score (with `--genome`),
+     consistent between replicates and not a shoulder;
+   * **medium**: ≥ 10 reads or a positive promoter score, and consistent;
+   * **low**: the rest.
+
+   On the benchmarks, 99–100% of high-confidence TSS called from 20% of
+   the reads were confirmed by the full data, against 75–89% of medium
+   and 47–79% of low ones.
+4. Writes `<prefix>.gff`, `<prefix>.tsv`, `<prefix>.qc.tsv` and
+   `<prefix>.design.txt` (what was chosen and why).
+
+`--genome` is recommended: the promoter score separates the tiers better.
+List only biological replicates as `--enriched`; technical replicates
+(resequencing of one library) do not show between-library variation.
+
+#### Development mode (`--mode dev`)
+
+With `--method cutoff` (the default in dev mode):
+
 1. Counts read 5' ends per position and strand (BAM, BED or 5'-end wiggle).
 2. Normalises each library to reads per million (RPM), using the total
    number of 5' ends counted in that library.
@@ -59,7 +114,7 @@ step.
    `enriched_rpm`, `control_rpm`, `log2_enrichment` and `replicates`.
 
 ```bash
-python cappable_tss.py call \
+python cappable_tss.py call --mode dev \
     --enriched enr_rep1.bam enr_rep2.bam \
     --control  ctl_rep1.bam ctl_rep2.bam \
     --annotation genome.gff --feature-types CDS \
@@ -75,7 +130,7 @@ is the quickest test.
 
 #### Reproducing Ettwiller et al. 2016
 
-`--preset ettwiller2016` applies the thresholds of the published
+`--mode dev --preset ettwiller2016` applies the thresholds of the published
 Cappable-seq pipeline (scripts at https://github.com/Ettwiller/TSS):
 
 | Step | Ettwiller script | Setting |
@@ -121,7 +176,7 @@ ratio of 0 is passed by chance at many positions with only a few reads.
   classification are as above.
 
 ```bash
-python cappable_tss.py call --method binomial \
+python cappable_tss.py call --mode dev --method binomial \
     --enriched enr_rep1.bam enr_rep2.bam \
     --control  ctl_rep1.bam ctl_rep2.bam \
     --annotation genome.gff --feature-types CDS \
@@ -154,7 +209,7 @@ variation between replicates. Small values (say < 0.001) mark sites carried
 by one library, such as a stack of PCR duplicates.
 
 ```bash
-python cappable_tss.py call --method local \
+python cappable_tss.py call --mode dev --method local \
     --enriched rep1.bam rep2.bam rep3.bam \
     --annotation genome.gff --feature-types CDS \
     --out-prefix results/TSS
@@ -226,8 +281,9 @@ python cappable_tss.py qc --enriched rep1.bam rep2.bam --control ctl.bam \
 ```
 
 `qc` exits with status 2 if any library is flagged. `call` runs the same
-checks, prints them, writes `<prefix>.qc.tsv` and continues; add
-`--strict-qc` to stop instead.
+checks, prints them and writes `<prefix>.qc.tsv`. In standard mode a flagged
+enriched library stops the run; in dev mode `call` continues unless
+`--strict-qc` is given.
 
 ### `annogesic-libs`: prepare Cappable-seq data for ANNOgesic
 

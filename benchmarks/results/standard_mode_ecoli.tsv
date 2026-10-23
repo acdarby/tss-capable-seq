@@ -1,0 +1,5 @@
+dataset	method	n_tss	share	core10	core10_bg	n_thinned	confirmed
+ecoli	cutoff_high	8962	0.539	0.684	0.073	5231	0.994
+ecoli	cutoff_medium	7677	0.461	0.282	0.075	8292	0.754
+ecoli	cutoff_low	0	0.000	NA	NA	6763	0.474
+ecoli	cutoff_all	16639	1.000	0.499	0.080	20286	0.723

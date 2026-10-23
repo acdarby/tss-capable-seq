@@ -1,0 +1,5 @@
+dataset	method	n_tss	share	core10	core10_bg	n_thinned	confirmed	ortho_rise	ortho_rise_bg
+walbb	local_high	7522	0.367	0.670	0.166	3567	0.993	0.415	0.116
+walbb	local_medium	8619	0.421	0.536	0.171	4826	0.891	0.309	0.127
+walbb	local_low	4344	0.212	0.445	0.165	2530	0.792	0.216	0.143
+walbb	local_all	20485	1.000	0.566	0.168	10923	0.901	0.328	0.126

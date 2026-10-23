@@ -200,6 +200,8 @@ class TSS(object):
         self.consistency_p = float("nan")  # replicate agreement (local calling)
         self.promoter_score = float("nan")  # genome-trained promoter score
         self.peak_ratio = float("nan")      # RPM / strongest call upstream (mark_shoulders)
+        self.reads = float("nan")           # 5'-end reads, summed over replicates
+        self.confidence = ""                # standard mode: high, medium or low
         self.classes = set()
         self.genes = defaultdict(list)     # class -> [(gene name, UTR length)]
 
@@ -263,9 +265,11 @@ def call_positions(enriched, controls, min_rpm=1.0, min_log2fc=1.0,
 
     calls = []
     for seqid, strand, pos in keys:
-        e_values, c_values, fcs, passed = [], [], [], 0
+        e_values, c_values, fcs, passed, reads = [], [], [], 0, 0.0
         for i, lib in enumerate(enriched):
-            e_rpm = lib.get((seqid, strand), {}).get(pos, 0.0) * scales[i]
+            count = lib.get((seqid, strand), {}).get(pos, 0.0)
+            reads += count
+            e_rpm = count * scales[i]
             if rpm_decimals is not None:
                 e_rpm = round(e_rpm, rpm_decimals)
             if controls:
@@ -284,8 +288,10 @@ def call_positions(enriched, controls, min_rpm=1.0, min_log2fc=1.0,
             passed += ok
         if passed >= min_replicates:
             n = float(len(enriched))
-            calls.append(TSS(seqid, pos, strand, sum(e_values) / n,
-                             sum(c_values) / n, sum(fcs) / n, passed))
+            tss = TSS(seqid, pos, strand, sum(e_values) / n,
+                      sum(c_values) / n, sum(fcs) / n, passed)
+            tss.reads = reads
+            calls.append(tss)
     calls.sort(key=lambda t: t.key)
     return calls
 
@@ -600,10 +606,11 @@ def call_binomial(enriched, controls, fdr=0.05, min_fold=1.0, min_reads=3,
 
     tested = []
     for seqid, strand, pos in keys:
-        pvals, e_rpm, c_rpm, fcs, passed = [], [], [], [], 0
+        pvals, e_rpm, c_rpm, fcs, passed, reads = [], [], [], [], 0, 0.0
         for i in range(reps):
             e = enriched[i].get((seqid, strand), {}).get(pos, 0.0)
             c = controls[i].get((seqid, strand), {}).get(pos, 0.0)
+            reads += e
             pvals.append(betabinom_sf(int(round(e)), int(round(e + c)), p0[i], dispersion))
             er, cr = e / e_size[i] * 1e6, c / c_size[i] * 1e6
             fc = math.log2((er + 1e-9) / (cr + 1e-9)) if er or cr else float("nan")
@@ -611,16 +618,18 @@ def call_binomial(enriched, controls, fdr=0.05, min_fold=1.0, min_reads=3,
             c_rpm.append(cr)
             fcs.append(fc)
             passed += e * c_size[i] > min_fold * c * e_size[i]
-        tested.append((seqid, strand, pos, fisher_combine(pvals), e_rpm, c_rpm, fcs, passed))
+        tested.append((seqid, strand, pos, fisher_combine(pvals), e_rpm, c_rpm, fcs, passed,
+                       reads))
 
     qvals = bh_qvalues([t[3] for t in tested])
     calls = []
-    for (seqid, strand, pos, p, e_rpm, c_rpm, fcs, passed), q in zip(tested, qvals):
+    for (seqid, strand, pos, p, e_rpm, c_rpm, fcs, passed, reads), q in zip(tested, qvals):
         if q <= fdr and passed >= min_replicates:
             finite = [f for f in fcs if f == f and abs(f) != float("inf")]
             tss = TSS(seqid, pos, strand, sum(e_rpm) / reps, sum(c_rpm) / reps,
                       sum(finite) / len(finite) if finite else float("inf"), passed)
             tss.pvalue, tss.qvalue = p, q
+            tss.reads = reads
             calls.append(tss)
     calls.sort(key=lambda t: t.key)
     return calls
@@ -775,6 +784,7 @@ def call_local(enriched, controls=None, fdr=0.05, min_reads=3, min_replicates=1,
             log2fc = math.log2(e_rpm / c_rpm) if c else float("inf")
         tss = TSS(seqid, pos, strand, e_rpm, c_rpm, log2fc, present)
         tss.pvalue, tss.qvalue = p, q
+        tss.reads = x
         tss.background = rate
         tss.consistency_p = consistency_pvalue(
             [lib.get((seqid, strand), {}).get(pos, 0.0) for lib in enriched], e_size, between)
@@ -968,6 +978,90 @@ def add_promoter_scores(calls, genome, strong_share=1 / 3.0, min_positives=200, 
 
 
 # ---------------------------------------------------------------------------
+# Standard mode: design-based choice of method, and confidence per TSS
+# ---------------------------------------------------------------------------
+
+CONFIDENT_READS = 10       # reads at which weak sites were usually confirmed
+CONSISTENCY_ALPHA = 0.001  # replicate consistency_p below this: inconsistent
+SHOULDER_RATIO = 0.1       # peak_ratio below this: shoulder of a stronger TSS
+
+
+def assign_confidence(calls):
+    """Set tss.confidence to high, medium or low from evidence that does not
+    depend on the calling threshold (benchmarks/README.md, standard mode):
+
+    * reads: at least CONFIDENT_READS 5'-end reads (all replicates);
+    * promoter: genome-trained promoter score > 0 (if computed);
+    * consistent: replicate consistency_p >= CONSISTENCY_ALPHA (if computed);
+    * not a shoulder: peak_ratio >= SHOULDER_RATIO (if computed).
+
+    high: reads, promoter (when scored), consistent and not a shoulder;
+    medium: reads or promoter, and consistent; low: the rest.
+    """
+    for t in calls:
+        reads = t.reads == t.reads and t.reads >= CONFIDENT_READS
+        scored = t.promoter_score == t.promoter_score
+        promoter = scored and t.promoter_score > 0
+        consistent = not (t.consistency_p == t.consistency_p
+                          and t.consistency_p < CONSISTENCY_ALPHA)
+        shoulder = t.peak_ratio == t.peak_ratio and t.peak_ratio < SHOULDER_RATIO
+        if reads and (promoter or not scored) and consistent and not shoulder:
+            t.confidence = "high"
+        elif (reads or promoter) and consistent:
+            t.confidence = "medium"
+        else:
+            t.confidence = "low"
+    return calls
+
+
+def choose_design(n_enriched, n_control):
+    """Method and settings for an experimental design, with the reasons.
+
+    From the benchmarks (benchmarks/README.md): with replicates the
+    local-background test ranks TSS best and stops where calls stop looking
+    like promoters; with one library it calls isolated read stacks, so the
+    published Cappable-seq cut-offs (Ettwiller et al. 2016) are used.
+    """
+    reasons = []
+    if n_enriched >= 2:
+        design = dict(method="local", min_replicates=1)
+        reasons.append("%d enriched replicates: test against the local background "
+                       "(pooled replicates, reads in at least one replicate, FDR 5%%)"
+                       % n_enriched)
+        if n_control:
+            reasons.append("control given: sites less abundant after enrichment than in "
+                           "the control (processed ends) are removed")
+        else:
+            reasons.append("no control: processed RNA ends cannot be told from TSS; a "
+                           "non-enriched control is recommended")
+    else:
+        design = dict(method="cutoff", preset="ettwiller2016")
+        reasons.append("one enriched library: published Cappable-seq cut-offs "
+                       "(Ettwiller et al. 2016; >= 1.5 RPM, enrichment >= 0, 6-nt clusters); "
+                       "statistical calling needs replicates to remove read stacks, so "
+                       "biological replicates are recommended")
+        if not n_control:
+            reasons.append("no control: only the RPM cut-off applies; processed RNA ends "
+                           "cannot be removed")
+    return design, reasons
+
+
+def write_design(path, design, reasons, qc_flagged, extras):
+    with open(path, "w") as out:
+        out.write("Standard mode\n")
+        out.write("method: %s\n" % ", ".join("%s=%s" % kv for kv in sorted(design.items())))
+        for line in reasons + extras:
+            out.write("- %s\n" % line)
+        if qc_flagged:
+            out.write("- library check: %d librar%s flagged (see .qc.tsv)\n"
+                      % (qc_flagged, "y" if qc_flagged == 1 else "ies"))
+        out.write("confidence: high = >= %d reads, positive promoter score (with --genome), "
+                  "consistent replicates, not a shoulder (peak_ratio >= %g); medium = reads "
+                  "or promoter, and consistent; low = the rest\n"
+                  % (CONFIDENT_READS, SHOULDER_RATIO))
+
+
+# ---------------------------------------------------------------------------
 # Annotation and classification
 # ---------------------------------------------------------------------------
 
@@ -1147,6 +1241,10 @@ def write_gff(tss_list, path, source="ANNOgesic-Cappable"):
                 attrs.append("promoter_score=%.2f" % tss.promoter_score)
             if tss.peak_ratio == tss.peak_ratio:
                 attrs.append("peak_ratio=%.3g" % tss.peak_ratio)
+            if tss.reads == tss.reads:
+                attrs.append("reads=%d" % round(tss.reads))
+            if tss.confidence:
+                attrs.append("confidence=%s" % tss.confidence)
             out.write("\t".join([tss.seqid, source, "TSS", str(tss.pos),
                                  str(tss.pos), _fmt(tss.enriched_rpm),
                                  tss.strand, ".", ";".join(attrs)]) + "\n")
@@ -1156,7 +1254,7 @@ def write_table(tss_list, path):
     header = ["seqid", "position", "strand", "type", "associated_gene",
               "UTR_length", "enriched_rpm", "control_rpm", "log2_enrichment",
               "replicates", "pvalue", "qvalue", "consistency_p", "promoter_score",
-              "peak_ratio"]
+              "peak_ratio", "reads", "confidence"]
     with open(path, "w") as out:
         out.write("\t".join(header) + "\n")
         for tss in tss_list:
@@ -1166,6 +1264,8 @@ def write_table(tss_list, path):
                 _fmt(tss.control_rpm), _fmt(tss.log2fc), str(tss.replicates),
                 _fmt_p(tss.pvalue), _fmt_p(tss.qvalue), _fmt_p(tss.consistency_p),
                 _fmt(tss.promoter_score), _fmt(tss.peak_ratio),
+                "NA" if tss.reads != tss.reads else "%d" % round(tss.reads),
+                tss.confidence or "NA",
             ]) + "\n")
 
 
@@ -1528,11 +1628,11 @@ def build_parser():
     add_inputs(call)
     call.add_argument("--annotation", help="GFF3 genome annotation")
     call.add_argument("--shoulder-ratio", type=float, default=0.0,
-                      help="Drop a TSS with less than this share of the RPM of a "
+                      help="[dev] Drop a TSS with less than this share of the RPM of a "
                            "stronger TSS on the same strand within --shoulder-window nt "
                            "upstream (its downstream shoulder); 0 keeps all (default 0)")
     call.add_argument("--shoulder-window", type=int, default=30,
-                      help="Window for --shoulder-ratio, nt upstream (default 30)")
+                      help="[dev] Window for --shoulder-ratio, nt upstream (default 30)")
     call.add_argument("--genome",
                       help="Genome FASTA: adds a promoter score per TSS from a sequence "
                            "model trained on this genome's strongest TSS (-60..-1, "
@@ -1540,62 +1640,67 @@ def build_parser():
     call.add_argument("--feature-types", default="gene",
                       help="Comma-separated GFF feature types used as genes "
                            "(default: gene; CDS is a common alternative)")
-    call.add_argument("--method", choices=("cutoff", "binomial", "local"), default="cutoff",
-                      help="cutoff: fixed RPM and enrichment cut-offs (the presets); "
+    call.add_argument("--mode", choices=("standard", "dev"), default="standard",
+                      help="standard: choose the method and settings from the design "
+                           "(number of replicates, control, library check) and give each "
+                           "TSS a confidence (high, medium, low); dev: choose them with "
+                           "the options marked [dev] (default standard)")
+    call.add_argument("--method", choices=("cutoff", "binomial", "local"),
+                      help="[dev] cutoff: fixed RPM and enrichment cut-offs (the presets); "
                            "binomial: test enriched against control counts at each "
                            "position with a false-discovery rate (needs --control); "
                            "local: test 5'-end pile-ups against the local background "
                            "(no control needed; a control removes depleted sites). "
-                           "Default: cutoff")
+                           "Default in dev mode: cutoff")
     call.add_argument("--fdr", type=float, default=0.05,
-                      help="binomial, local: false-discovery rate (default 0.05)")
+                      help="[dev] binomial, local: false-discovery rate (default 0.05)")
     call.add_argument("--min-fold", type=float, default=1.0,
-                      help="binomial: enrichment over the control that the test must "
+                      help="[dev] binomial: enrichment over the control that the test must "
                            "exceed (default 1, i.e. any enrichment)")
     call.add_argument("--min-reads", type=int, default=3,
-                      help="binomial: test only positions with at least this many reads "
+                      help="[dev] binomial: test only positions with at least this many reads "
                            "in one enriched library; local: in the pooled replicates "
                            "(default 3)")
     call.add_argument("--window", type=int, default=100,
-                      help="local: background window either side of a site (default 100)")
+                      help="[dev] local: background window either side of a site (default 100)")
     call.add_argument("--gap", type=int, default=2,
-                      help="local: nt either side of a site left out of its background "
+                      help="[dev] local: nt either side of a site left out of its background "
                            "(default 2)")
     call.add_argument("--trim", type=int, default=5,
-                      help="local: busiest window positions left out of the background, "
+                      help="[dev] local: busiest window positions left out of the background, "
                            "so a neighbouring TSS does not count (default 5)")
     call.add_argument("--local-dispersion", type=float, default=DEFAULT_LOCAL_DISPERSION,
-                      help="local: negative-binomial dispersion of counts around the "
+                      help="[dev] local: negative-binomial dispersion of counts around the "
                            "background (default %g)" % DEFAULT_LOCAL_DISPERSION)
     call.add_argument("--dispersion", default="auto",
-                      help="binomial: variation between libraries beyond sampling noise "
+                      help="[dev] binomial: variation between libraries beyond sampling noise "
                            "(beta-binomial test); 'auto' estimates it from enriched "
                            "replicates, or uses %g with one replicate; 0 gives the plain "
                            "binomial test (default auto)" % DEFAULT_DISPERSION)
     call.add_argument("--normalise", choices=("total", "exclude-rna"), default="exclude-rna",
-                      help="binomial, local: library sizes from all reads, or leaving out reads "
+                      help="[dev] binomial, local: library sizes from all reads, or leaving out reads "
                            "in rRNA and tRNA genes of --annotation (default exclude-rna; "
                            "falls back to total without an annotation)")
-    call.add_argument("--preset", choices=sorted(PRESETS), default="default",
-                      help="Starting set of thresholds; 'ettwiller2016' "
+    call.add_argument("--preset", choices=sorted(PRESETS),
+                      help="[dev] Starting set of thresholds; 'ettwiller2016' "
                            "reproduces Ettwiller et al. 2016. Options given "
-                           "explicitly override the preset (default: default)")
+                           "explicitly override the preset (default in dev mode: default)")
     call.add_argument("--min-rpm", type=float,
-                      help="Minimum 5'-end reads per million in the enriched "
+                      help="[dev] Minimum 5'-end reads per million in the enriched "
                            "library (default 1.0)")
     call.add_argument("--min-log2fc", type=float,
-                      help="Minimum log2(enriched/control) (default 1.0)")
+                      help="[dev] Minimum log2(enriched/control) (default 1.0)")
     call.add_argument("--pseudocount", type=float,
-                      help="RPM pseudocount for the enrichment ratio (default 1.0)")
+                      help="[dev] RPM pseudocount for the enrichment ratio (default 1.0)")
     call.add_argument("--control-floor", type=float,
-                      help="Minimum control read count used in the ratio "
+                      help="[dev] Minimum control read count used in the ratio "
                            "(default 0)")
     call.add_argument("--min-replicates", type=int,
-                      help="Replicates in which a position must pass (cutoff, binomial) "
+                      help="[dev] Replicates in which a position must pass (cutoff, binomial) "
                            "or have reads (local) (default: 1 for cutoff and local, all "
                            "for binomial)")
     call.add_argument("--cluster-distance", type=int,
-                      help="Merge TSS on the same strand no more than this "
+                      help="[dev] Merge TSS on the same strand no more than this "
                            "many nt apart; 0 disables (default 5)")
     call.add_argument("--utr-length", type=int, default=300,
                       help="Maximum 5' UTR length for Primary/Secondary (default 300)")
@@ -1646,6 +1751,84 @@ def build_parser():
     return parser
 
 
+DEV_OPTIONS = {"--method", "--preset", "--shoulder-ratio", "--shoulder-window", "--fdr",
+               "--min-fold", "--min-reads", "--window", "--gap", "--trim",
+               "--local-dispersion", "--dispersion", "--normalise", "--min-rpm",
+               "--min-log2fc", "--pseudocount", "--control-floor", "--min-replicates",
+               "--cluster-distance"}
+
+
+def standard_calls(enriched, controls, exclude=None, genome=None, stream=None):
+    """The standard-mode calls for a design: method from choose_design,
+    6-nt clusters, peak_ratio, promoter score (with a genome) and confidence.
+    Returns (calls, design, reasons, extra notes)."""
+    design, reasons = choose_design(len(enriched), len(controls))
+    extras = []
+    if exclude is not None:
+        extras.append("library sizes leave out reads in rRNA and tRNA genes")
+    if design["method"] == "local":
+        calls = call_local(enriched, controls or None, min_replicates=1, exclude=exclude)
+    else:
+        if controls and len(controls) != len(enriched):
+            controls = [pool_signals(controls)]
+            extras.append("controls pooled into one")
+        preset = dict(PRESETS[design["preset"]])
+        calls = call_positions(enriched, controls, min_rpm=preset["min_rpm"],
+                               min_log2fc=preset["min_log2fc"], min_replicates=1,
+                               pseudocount=preset["pseudocount"],
+                               control_floor=preset["control_floor"],
+                               rpm_decimals=preset["rpm_decimals"])
+    calls = cluster_tss(calls, 6)
+    mark_shoulders(calls, 30)
+    if genome is not None:
+        if add_promoter_scores(calls, genome, stream=stream):
+            extras.append("promoter score trained on this genome's strongest TSS")
+    else:
+        extras.append("no --genome: no promoter score (recommended: it helps tell weak TSS "
+                      "from noise)")
+    assign_confidence(calls)
+    return calls, design, reasons, extras
+
+
+def _call_standard(args):
+    """`call --mode standard`: method and settings from the design."""
+    enriched = [load_library(p, args.mate, args.min_mapq) for p in args.enriched]
+    controls = [load_library(p, args.mate, args.min_mapq) for p in args.control]
+    genes = (read_genes(args.annotation, tuple(args.feature_types.split(",")))
+             if args.annotation else None)
+    out_dir = os.path.dirname(args.out_prefix)
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True)
+    roles = ["enriched"] * len(enriched) + ["control"] * len(controls)
+    flagged = run_qc(args.enriched + args.control, enriched + controls, roles, genes,
+                     args.out_prefix + ".qc.tsv")
+    enriched_flagged = sum(1 for sig in enriched if qc_warnings(library_qc(sig, genes), "enriched"))
+    if enriched_flagged:
+        sys.stderr.write("Stopping: %d enriched librar%s do not look like 5'-end data, so "
+                         "read starts do not mark TSS (see the check above). Use --mode dev "
+                         "to call anyway.\n" % (enriched_flagged,
+                                                 "y" if enriched_flagged == 1 else "ies"))
+        return 2
+    exclude = (GeneIndex(read_genes(args.annotation, ("rRNA", "tRNA")))
+               if args.annotation else None)
+    genome = read_fasta(args.genome) if args.genome else None
+    calls, design, reasons, extras = standard_calls(enriched, controls, exclude, genome,
+                                                    stream=sys.stderr)
+    if genes is not None:
+        classify(calls, genes, args.utr_length, args.antisense_distance)
+    for line in reasons + extras:
+        sys.stderr.write("Design: %s\n" % line)
+    write_design(args.out_prefix + ".design.txt", design, reasons, flagged, extras)
+    write_gff(calls, args.out_prefix + ".gff")
+    write_table(calls, args.out_prefix + ".tsv")
+    print(summarise(calls))
+    tiers = defaultdict(int)
+    for t in calls:
+        tiers[t.confidence] += 1
+    print("Confidence: " + ", ".join("%s %d" % (k, tiers[k]) for k in ("high", "medium", "low")))
+    return 0
+
+
 def main(argv=None):
     args = build_parser().parse_args(argv)
 
@@ -1684,6 +1867,18 @@ def main(argv=None):
         flagged = run_qc(paths, signals, roles, genes, args.out, stream=sys.stdout)
         return 2 if flagged else 0
 
+    if args.mode == "standard":
+        given = sorted({a.split("=", 1)[0] for a in (argv if argv is not None else sys.argv[1:])
+                        if a.split("=", 1)[0] in DEV_OPTIONS})
+        if given:
+            sys.stderr.write("%s: only in --mode dev (standard mode chooses the method and "
+                             "settings from the design)\n" % ", ".join(given))
+            return 1
+        return _call_standard(args)
+    if args.method is None:
+        args.method = "cutoff"
+    if args.preset is None:
+        args.preset = "default"
     settings = dict(PRESETS[args.preset])
     for name in settings:
         value = getattr(args, name, None)

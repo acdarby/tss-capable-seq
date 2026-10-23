@@ -28,7 +28,7 @@ Bowtie2 `--local -L 16`. Outputs are `comparison.txt`, `offsets.tsv`,
 
 ## Results (October 2026)
 
-Agreement of `cappable_tss.py call --preset ettwiller2016` with Table S1:
+Agreement of `cappable_tss.py call --mode dev --preset ettwiller2016` with Table S1:
 
 | Window | Our calls in Table S1 | Table S1 recovered |
 |---|---|---|
