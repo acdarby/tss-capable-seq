@@ -1,0 +1,6 @@
+dataset	method	design	reads	n_tss	high	medium	low	core10	core10_bg	core10_high	in_rna	confirmed_by_full
+salmonella	2 replicates	local	15969142	40173	13831	17752	8590	0.533	0.074	0.672	0.013	
+salmonella	same reads as 1 library	cutoff	15969142	12036	8160	3876	0	0.639	0.081	0.705	0.016	
+salmonella	50% of reads	local	7985001	28996	9769	13117	6110	0.569	0.075	0.692	0.014	0.683
+salmonella	25% of reads	local	3994636	20484	6628	9612	4244	0.598	0.080	0.711	0.014	0.862
+salmonella	10% of reads	local	1594139	12340	3892	5913	2535	0.637	0.080	0.739	0.014	0.962

@@ -77,8 +77,10 @@ python cappable_tss.py call \
    `<prefix>.design.txt` (what was chosen and why).
 
 `--genome` is recommended: the promoter score separates the tiers better.
-List only biological replicates as `--enriched`; technical replicates
-(resequencing of one library) do not show between-library variation.
+List independent libraries as `--enriched` (biological replicates
+preferred). Resequencing one library adds depth but not a replicate:
+artefacts made in that library, such as PCR-duplicate stacks, repeat in it.
+How to design the experiment: `docs/design_recommendations.md`.
 
 #### Development mode (`--mode dev`)
 

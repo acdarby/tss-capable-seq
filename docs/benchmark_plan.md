@@ -227,7 +227,7 @@ two of the symbiont datasets, and the result is written into the report.
 
 The end products of this plan:
 
-- [ ] **Ranked experimental-design recommendations**: which designs give
+- [x] **Ranked experimental-design recommendations** (docs/design_recommendations.md): which designs give
       reliable TSS, ranked on the benchmarks (control or not; number of
       biological replicates; technical against biological replicates;
       sequencing depth, using downsampling; library type, 5'-ligation against

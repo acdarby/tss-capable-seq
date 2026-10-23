@@ -1,0 +1,6 @@
+dataset	method	design	reads	n_tss	high	medium	low	core10	core10_bg	core10_high	in_rna	confirmed_by_full
+ecoli	50% of reads	cutoff	6540803	17344	9468	7876	0	0.489	0.075	0.672	0.004	0.888
+ecoli	25% of reads	cutoff	3268658	19185	6128	7871	5186	0.471	0.077	0.711	0.005	0.775
+ecoli	10% of reads	cutoff	1307050	28374	3347	10863	14164	0.388	0.070	0.755	0.006	0.492
+ecoli	with control	cutoff	13074616	16639	8962	7677	0	0.499	0.073	0.684	0.004	
+ecoli	without control	cutoff	13074616	17005	9063	7942	0	0.492	0.074	0.683	0.023	

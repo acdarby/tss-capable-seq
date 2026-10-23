@@ -1,0 +1,6 @@
+dataset	method	design	reads	n_tss	high	medium	low	core10	core10_bg	core10_high	in_rna	ortho_rise	confirmed_by_full
+walbb	3 replicates	local	31865478	20485	7522	8619	4344	0.566	0.169	0.670	0.004	0.328	
+walbb	same reads as 1 library	cutoff	31865478	5436	3384	2052	0	0.658	0.194	0.703	0.013	0.540	
+walbb	50% of reads	local	15928073	15993	5497	6804	3692	0.590	0.170	0.687	0.004	0.363	0.735
+walbb	25% of reads	local	7968442	12077	4008	5292	2777	0.611	0.184	0.707	0.005	0.405	0.872
+walbb	10% of reads	local	3187777	7835	2401	3496	1938	0.643	0.179	0.715	0.007	0.467	0.956

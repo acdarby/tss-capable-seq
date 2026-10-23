@@ -14,6 +14,7 @@ Tools to judge TSS-calling methods on real and simulated Cappable-seq data
 | `promoter_model.py` | Genome-trained promoter score: recognition, rescue at low depth, learned weights |
 | `shoulders.py` | Calls in the downstream shoulder of a stronger TSS: evidence for removed and kept calls |
 | `standard_mode.py` | Validates the standard mode and its confidence tiers |
+| `design.py` | Design comparisons (replicates against one library, depth, control) for `docs/design_recommendations.md` |
 | `ettwiller2016/` | Rebuilds the *E. coli* data and compares with the published TSS table |
 | `frontiers2026/` | TSSpredator and ANNOgesic on wAlbB fragment-library data |
 | `tools/` | Download SRA runs, list runs per project, annotate genomes, TSS statistics |
