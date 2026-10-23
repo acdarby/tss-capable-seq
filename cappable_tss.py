@@ -368,9 +368,12 @@ def betabinom_sf(k, n, p, dispersion):
 
     The beta-binomial adds variation of the success probability between
     libraries to binomial sampling. With independent gamma-distributed rate
-    multipliers of variance `dispersion` in each of two libraries, the split of
-    reads between them is approximately Beta with a + b = 2 / dispersion.
-    `dispersion` 0 gives the binomial test.
+    multipliers of variance `dispersion` (d) in each of two libraries, the log
+    odds of the split of reads between them has variance about 2d whatever the
+    library sizes. The Beta is matched to that: its logit has variance
+    trigamma(a) + trigamma(b), about 1/a + 1/b, so a = 1 / (2d(1 - p)) and
+    b = 1 / (2dp), which keeps the mean at p and is exact (Beta(1/d, 1/d)) for
+    p = 0.5. `dispersion` 0 gives the binomial test.
     """
     if dispersion <= 0:
         return binom_sf(k, n, p)
@@ -382,8 +385,7 @@ def betabinom_sf(k, n, p, dispersion):
         return 0.0
     if p >= 1.0:
         return 1.0
-    total = 2.0 / dispersion
-    a, b = p * total, (1.0 - p) * total
+    a, b = 1.0 / (2.0 * dispersion * (1.0 - p)), 1.0 / (2.0 * dispersion * p)
 
     def log_pmf(x):
         return (math.lgamma(n + 1) - math.lgamma(x + 1) - math.lgamma(n - x + 1)

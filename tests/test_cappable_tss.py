@@ -300,7 +300,7 @@ class BamTests(unittest.TestCase):
 
 def exact_betabinom_sf(k, n, p, dispersion):
     """Reference beta-binomial tail: every term summed in log space."""
-    a, b = p * 2.0 / dispersion, (1.0 - p) * 2.0 / dispersion
+    a, b = 1.0 / (2.0 * dispersion * (1.0 - p)), 1.0 / (2.0 * dispersion * p)
     logs = [math.lgamma(n + 1) - math.lgamma(x + 1) - math.lgamma(n - x + 1)
             + math.lgamma(x + a) + math.lgamma(n - x + b) - math.lgamma(n + a + b)
             - math.lgamma(a) - math.lgamma(b) + math.lgamma(a + b) for x in range(k, n + 1)]
@@ -377,13 +377,13 @@ class StatisticsTests(unittest.TestCase):
             self.assertAlmostEqual(est, true, delta=0.01, msg=true)
         self.assertIsNone(ct.estimate_dispersion([libs[0]]))
 
-    def null_pair(self, rng, mult_sd=0.0, n=3000):
+    def null_pair(self, rng, mult_sd=0.0, n=3000, enriched_depth=1.0):
         enr, ctl = {("c", "+"): {}}, {("c", "+"): {}}
         for pos in range(1, n + 1):
             rate = math.exp(rng.gauss(3.0, 1.0))
-            for lib in (enr, ctl):
+            for lib, depth in ((enr, enriched_depth), (ctl, 1.0)):
                 mult = rng.gammavariate(1 / mult_sd, mult_sd) if mult_sd else 1.0
-                lam, k, t = rate * mult, 0, rng.expovariate(1.0)
+                lam, k, t = rate * mult * depth, 0, rng.expovariate(1.0)
                 while t < lam:          # Poisson by exponential waiting times
                     k += 1
                     t += rng.expovariate(1.0)
@@ -409,6 +409,19 @@ class StatisticsTests(unittest.TestCase):
         bb = ct.call_binomial([enr], [ctl], fdr=0.05, dispersion=0.1)
         self.assertGreater(len(plain), 5)
         self.assertLessEqual(len(bb), 2)
+
+    def test_beta_binomial_with_unequal_library_sizes(self):
+        import random
+        # Enriched library four times deeper (p0 = 0.8): still calibrated, and a
+        # deep site enriched 3-fold is still found (an a + b = 2/d Beta, matched
+        # on the share rather than the log odds, has too heavy an upper tail here).
+        enr, ctl = self.null_pair(random.Random(4), mult_sd=0.1, enriched_depth=4.0)
+        self.assertLessEqual(len(ct.call_binomial([enr], [ctl], fdr=0.05, dispersion=0.1)), 2)
+        size = ct.library_size(enr) / ct.library_size(ctl)
+        enr[("c", "+")][5000] = 3.0 * size * 300
+        ctl[("c", "+")][5000] = 300.0
+        calls = ct.call_binomial([enr], [ctl], fdr=0.05, dispersion=0.02)
+        self.assertIn(5000, [t.pos for t in calls])
 
     def test_call_binomial_replicates_and_exclusion(self):
         enr1 = {("c", "+"): {100: 50.0, 300: 50.0, 2000: 1000.0}}
