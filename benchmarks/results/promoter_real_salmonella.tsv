@@ -1,0 +1,5 @@
+dataset	method	n_tss	share_Primary	share_Secondary	share_Internal	share_Antisense	share_Orphan	prom_core10	prom_box10	prom_ext10	prom_box35	prom_purine	prom_core10_bg	prom_box10_bg	prom_box35_bg	prom_core10_Primary	prom_core10_Internal	prom_core10_Antisense	box10_all	box35_all	box10_Primary	box10_Internal	box10_Antisense	box10_background	loo_support	down0.5_n	down0.5_recovery	down0.25_n	down0.25_recovery
+salmonella	ettwiller2016	10609	0.242	0.150	0.373	0.344	0.030	0.650	0.322	0.142	0.151	0.897	0.087	0.037	0.014	0.689	0.642	0.655	0.332	0.089	0.360	0.295	0.356	0.025	0.882	10414	0.934	10025	0.876
+salmonella	suliman2025	3483	0.524	0.115	0.258	0.243	0.028	0.683	0.358	0.188	0.201	0.882	0.085	0.038	0.011	0.709	0.654	0.675	0.367	0.117	0.376	0.341	0.360	0.025	0.938	3443	0.968	3427	0.950
+salmonella	local	40173	0.092	0.140	0.445	0.411	0.028	0.533	0.249	0.083	0.098	0.889	0.075	0.031	0.010	0.636	0.518	0.537	0.258	0.066	0.329	0.218	0.282	0.024	0.786	28986	0.713	20356	0.500
+salmonella	local_allreps	37071	0.098	0.141	0.442	0.409	0.028	0.542	0.254	0.086	0.100	0.890	0.073	0.030	0.011	0.639	0.528	0.544	0.263	0.067	0.330	0.222	0.287	0.024	0.786	26767	0.715	18755	0.500

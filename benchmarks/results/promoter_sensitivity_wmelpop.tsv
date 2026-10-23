@@ -1,0 +1,10 @@
+dataset	method	n_tss	core10_called	core10_top2000
+wmelpop	defaults	5779	0.661	0.711
+wmelpop	window=50	5803	0.662	0.712
+wmelpop	window=200	5761	0.660	0.710
+wmelpop	trim=0	4768	0.675	0.707
+wmelpop	trim=10	5884	0.658	0.717
+wmelpop	min_reads=2	7757	0.633	0.711
+wmelpop	min_reads=5	3979	0.681	0.711
+wmelpop	fdr=0.01	5670	0.664	0.711
+wmelpop	fdr=0.1	5812	0.660	0.711

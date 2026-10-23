@@ -1,0 +1,10 @@
+dataset	method	n_tss	core10_called	core10_top8000
+ecoli	defaults	51064	0.385	0.670
+ecoli	window=50	54665	0.369	0.673
+ecoli	window=200	48642	0.394	0.670
+ecoli	trim=0	33841	0.473	0.671
+ecoli	trim=10	56199	0.361	0.668
+ecoli	min_reads=2	51385	0.383	0.670
+ecoli	min_reads=5	41002	0.427	0.670
+ecoli	fdr=0.01	46191	0.411	0.670
+ecoli	fdr=0.1	53458	0.373	0.670

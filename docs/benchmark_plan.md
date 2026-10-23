@@ -47,10 +47,13 @@ scored on several independent lines of evidence:
 - [ ] **Reference agreement** (*E. coli* only): recall and precision against
       Table S1 at 0, ±1, ±5 nt; report separately for strong (≥ 20 reads) and
       weak TSS, since Table S1 has a 1.5 RPM floor.
-- [ ] **Promoter evidence**: share of TSS with a −10 / −35 box, per class,
+- [x] **Promoter evidence**: share of TSS with a −10 / −35 box, per class,
       against the same positions shifted 100 nt. Use a motif learned from each
       genome's own confident TSS (not *E. coli* TATAAT), because AT-rich
-      genomes inflate fixed-word matches.
+      genomes inflate fixed-word matches. Done as a fixed σ70 score from the
+      literature (−10 core, spaced −35, extended −10, +1 purine) with a
+      composition-matched background (benchmarks/README.md, "Promoter
+      score"); the genome-learned motif is approach H.
 - [ ] **Orthogonal support** (wAlbB): share of TSS with a coverage rise
       (≥ 1.5×, 50 nt downstream vs upstream) in the PRJNA1392518 enriched
       library, against shifted positions. First result: 73.1% of TSS called

@@ -31,7 +31,8 @@ Methods are registered in `harness.METHODS`; a new approach is a function
 | Measure | Meaning |
 |---|---|
 | `n_tss`, `share_<class>` | TSS on the chromosome and their class shares |
-| `box10_*`, `box35_*` | Share with a TATAAT-like −10 box (−15..−5) or TTGACA-like −35 box (−40..−28), one mismatch allowed; `box10_background` uses the same positions shifted 100 nt |
+| `prom_core10`, `prom_box10`, `prom_ext10`, `prom_box35`, `prom_purine` | Promoter score (from October 2026; see "Promoter score" below): σ70 −10 core, TATAAT, extended −10, −35 at the right spacing, purine at +1; `_bg` for composition-matched random positions |
+| `box10_*`, `box35_*` | Earlier measure, kept for comparison: share with a TATAAT-like −10 box (−15..−5) or TTGACA-like −35 box (−40..−28), one mismatch allowed; `box10_background` uses the same positions shifted 100 nt |
 | `ref_precision_w`, `ref_recall_w` | Agreement with the reference TSS within `w` nt (*E. coli* Table S1) |
 | `loo_support` | Leave-one-replicate-out: share of TSS called on the other replicates that the held-out replicate also calls (±2 nt) |
 | `downF_n`, `downF_recovery` | TSS called after keeping a fraction F of reads, and the share of full-depth TSS recovered (±2 nt) |
@@ -305,3 +306,73 @@ So with biological replicates the replicates agree within the measured
 variation and the evidence lies in the pooled count; replicates are best
 used to measure that variation and flag the rare site carried by one
 library.
+
+## Promoter score (October 2026)
+
+The earlier measure counted TATAAT and TTGACA (≤ 1 mismatch) anywhere in
+−15..−5 and −40..−28, separately. It is the textbook consensus but not the
+current model of σ70 promoters, so a fixed score from the literature was
+added (`harness.promoter_elements`; not learned from our calls, so it can
+judge methods without circularity):
+
+* **−10 core**: T, A and T at −12, −11 and −7, the hexamer starting at
+  −14..−10. A(−11) and T(−7) are the bases σ reads, flipped out of the DNA
+  (Feklistov & Darst 2011, *Cell* 147:1257, doi:10.1016/j.cell.2011.10.041).
+* **−35 at the right distance**: TTGACA (≤ 2 mismatches) 16–18 nt upstream of
+  a −10; some promoters lack a −35 and have a TG extended −10 instead
+  (Shultzaberger et al. 2007, *Nucleic Acids Res* 35:771,
+  doi:10.1093/nar/gkl956; Mitchell et al. 2003, *Nucleic Acids Res* 31:4689,
+  doi:10.1093/nar/gkg694), reported as `ext10`.
+* **+1 purine**.
+* **Composition-matched background** (`harness.MatchedBackground`): random
+  positions with the same AT share in −60..−1. AT-rich genomes contain more
+  promoter-like words by chance; shifting sites by 100 nt does not correct
+  for that.
+
+Not included: the UP element (Ross et al. 1993, *Science* 262:1407,
+doi:10.1126/science.8248780), the discriminator (Haugen et al. 2006, *Cell*
+125:1069, doi:10.1016/j.cell.2006.04.034) and promoters of other σ factors
+(review: Browning & Busby 2016, *Nat Rev Microbiol* 14:638,
+doi:10.1038/nrmicro.2016.103); TSS of other σ factors count as misses.
+
+**Check on our TSS** (`ettwiller2016` calls, background = shifted 100 nt):
+
+| | *E. coli* TSS / background | wAlbB TSS / background |
+|---|---|---|
+| TATAAT ≤ 1 mismatch, −20..−5 (old style) | 28% / 6.6% | 58% / 20% |
+| T·A···T core | 51% / 7.0% | 69% / 18% |
+| −10 hexamer starts at −12 or −13 / −12 or −11 | 66% of hits | 55% of hits |
+| −35 (≤ 2 mismatches) by spacer | peak at 16–17 nt | peak at 16–17 nt |
+| Extended −10 TG | 10% / 5.7% | 15% / 8% |
+| +1 purine | 81% / 50% | 88% / 53% |
+
+The core finds more promoters than the hexamer and separates TSS from
+background better (7× against 4× in *E. coli*); the −10 sits where the
+structure places it, and the −35 is enriched at the expected spacing.
+
+**Methods on the new score** (`results/promoter_real_*.tsv`; −10 core,
+composition-matched background in brackets):
+
+| | *E. coli* | *Salmonella* | wAlbB | wMelPop-CLA |
+|---|---|---|---|---|
+| `ettwiller2016` | 49.9% (7.4%) | 65.0% (8.7%) | 66.4% (17.3%) | 70.9% (17.7%) |
+| `suliman2025` | 63.0% (8.5%) | 68.3% (8.5%) | 71.2% (19.3%) | 75.4% (21.2%) |
+| beta-binomial (control) | 53.5% (8.1%) | – | – | – |
+| local | 38.5% (6.7%) | 53.3% (7.5%) | 56.6% (16.8%) | 66.1% (16.5%) |
+
+**Matched comparison** (`results/promoter_matched_*.tsv`; −10 core rate of
+the top N; background 7–11% *E. coli* and *Salmonella*, 17–20% *Wolbachia*):
+
+| Top N | *E. coli* RPM / local | *Salmonella* RPM / local | wAlbB RPM / local | wMelPop-CLA RPM / local |
+|---|---|---|---|---|
+| 1,000 | 70.5% / 74.7% | 70.3% / 70.8% | 72.5% / 72.9% | 73.7% / 74.1% |
+| 4,000 | 59.6% / **70.9%** | 68.5% / 69.6% | 66.6% / 70.0% | 67.3% / 68.5% |
+| 8,000 | 53.4% / **67.0%** | 66.4% / 67.8% | 62.5% / 66.3% | – |
+| 16,000 | 47.1% / **60.8%** | 62.2% / 63.7% | 56.2% / 60.0% | – |
+
+On the new score the conclusions are unchanged and clearer: the local test
+ranks best everywhere (much better in *E. coli*), the spaced −35 agrees
+(*E. coli* top 8,000: 17.9% against 15.2%), and in wAlbB the local test's FDR
+stops at about 20,500 sites, after which the core rate falls to the
+background (40%, 32%, 26%, 19% in successive bands of 2,000; background 20%).
+The setting sensitivity is also unchanged (`results/promoter_sensitivity_*`).
