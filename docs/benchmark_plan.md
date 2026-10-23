@@ -33,7 +33,7 @@ becomes a default. `--preset ettwiller2016` stays as the fixed baseline.
       exists (see section 8).
 - [ ] Suliman et al. unenriched libraries (Table 1 of the paper): locate or
       deposit; they would give *Wolbachia* a real control.
-- [ ] Write a dataset manifest (`benchmarks/datasets.yaml`): accessions,
+- [x] Write a dataset manifest (`benchmarks/datasets.toml`): accessions,
       genome and annotation accessions, host, library type, replicate
       structure, adapters, read layout, which mate carries the RNA 5' end.
 - [ ] One script per dataset that rebuilds the BAMs from the manifest
@@ -67,10 +67,10 @@ scored on several independent lines of evidence:
 - [ ] **Sanity checks**: +1 purine and −1/+1 YR frequency; TSS on sequences
       that should have none (e.g. the missing SL1344 plasmid pRSF1010); share
       of calls at known processing sites (tRNA/rRNA ends) as false positives.
-- [ ] **Simulation**: synthetic libraries with planted TSS of known strength
+- [x] **Simulation**: synthetic libraries with planted TSS of known strength
       on each real genome (background drawn from the real data), giving exact
       precision and recall per method and depth.
-- [ ] Benchmark harness (`benchmarks/run_all.py`): one command that runs every
+- [x] Benchmark harness (`benchmarks/harness.py`): one command that runs every
       method on every dataset and writes one summary table plus the report.
 
 ## 3. Baselines
@@ -182,8 +182,9 @@ two of the symbiont datasets, and the result is written into the report.
 
 ## 7. Development steps
 
-- [ ] Write the dataset manifest and the benchmark harness (sections 1–2).
-- [ ] Add simulation of planted TSS (section 2).
+- [x] Write the dataset manifest and the benchmark harness (sections 1–2);
+      baselines in `benchmarks/README.md`.
+- [x] Add simulation of planted TSS (section 2), calibrated from real libraries.
 - [ ] Implement A (library-type check) — small, independent, protects users.
 - [ ] Implement B + C + E (control-based statistics); run the section 5
       tests, then benchmark on *E. coli*.

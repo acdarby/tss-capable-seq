@@ -1,0 +1,13 @@
+dataset	method	n_tss	precision	recall	recall_weak	recall_medium	recall_strong	processed_called
+sim_walbb_enriched_only_depth1	ettwiller2016	5211	0.941	0.945	0.835	1.000	1.000	0.853
+sim_walbb_enriched_only_depth1	suliman2025	3525	1.000	0.679	0.108	0.930	1.000	0.000
+sim_walbb_enriched_only_depth0.25	ettwiller2016	6403	0.760	0.937	0.812	1.000	1.000	0.732
+sim_walbb_enriched_only_depth0.25	suliman2025	3342	1.000	0.644	0.065	0.866	1.000	0.000
+sim_walbb_enriched_only_depth0.05	ettwiller2016	3721	0.992	0.711	0.244	0.890	0.999	0.047
+sim_walbb_enriched_only_depth0.05	suliman2025	2828	1.000	0.545	0.030	0.612	0.993	0.000
+sim_walbb_with_control_depth1	ettwiller2016	4936	0.991	0.943	0.831	0.999	0.999	0.007
+sim_walbb_with_control_depth1	suliman2025	3525	1.000	0.679	0.108	0.930	1.000	0.000
+sim_walbb_with_control_depth0.25	ettwiller2016	4869	0.960	0.901	0.703	0.999	0.999	0.007
+sim_walbb_with_control_depth0.25	suliman2025	3342	1.000	0.644	0.065	0.866	1.000	0.000
+sim_walbb_with_control_depth0.05	ettwiller2016	2775	1.000	0.535	0.029	0.591	0.984	0.000
+sim_walbb_with_control_depth0.05	suliman2025	2828	1.000	0.545	0.030	0.612	0.993	0.000
