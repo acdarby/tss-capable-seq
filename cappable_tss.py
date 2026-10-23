@@ -195,6 +195,8 @@ class TSS(object):
         self.control_rpm = control_rpm     # mean over replicates
         self.log2fc = log2fc               # mean over replicates
         self.replicates = replicates       # replicates passing the cut-offs
+        self.pvalue = float("nan")         # statistical calling only
+        self.qvalue = float("nan")
         self.classes = set()
         self.genes = defaultdict(list)     # class -> [(gene name, UTR length)]
 
@@ -306,6 +308,242 @@ def cluster_tss(calls, distance=5):
     if cluster:
         merged.append(max(cluster, key=lambda t: t.enriched_rpm))
     return merged
+
+
+# ---------------------------------------------------------------------------
+# Statistical calling
+# ---------------------------------------------------------------------------
+
+def _beta_cf(a, b, x, max_iter=10000, eps=1e-15):
+    """Continued fraction for the incomplete beta function (modified Lentz)."""
+    tiny = 1e-300
+    qab, qap, qam = a + b, a + 1.0, a - 1.0
+    c, d = 1.0, 1.0 - qab * x / qap
+    d = 1.0 / (d if abs(d) > tiny else tiny)
+    h = d
+    for m in range(1, max_iter + 1):
+        m2 = 2 * m
+        aa = m * (b - m) * x / ((qam + m2) * (a + m2))
+        d = 1.0 + aa * d
+        d = 1.0 / (d if abs(d) > tiny else tiny)
+        c = 1.0 + aa / c
+        c = c if abs(c) > tiny else tiny
+        h *= d * c
+        aa = -(a + m) * (qab + m) * x / ((a + m2) * (qap + m2))
+        d = 1.0 + aa * d
+        d = 1.0 / (d if abs(d) > tiny else tiny)
+        c = 1.0 + aa / c
+        c = c if abs(c) > tiny else tiny
+        delta = d * c
+        h *= delta
+        if abs(delta - 1.0) < eps:
+            break
+    return h
+
+
+def betainc(a, b, x):
+    """Regularized incomplete beta function I_x(a, b)."""
+    if x <= 0.0:
+        return 0.0
+    if x >= 1.0:
+        return 1.0
+    log_front = (math.lgamma(a + b) - math.lgamma(a) - math.lgamma(b)
+                 + a * math.log(x) + b * math.log1p(-x))
+    if x < (a + 1.0) / (a + b + 2.0):
+        return math.exp(log_front) * _beta_cf(a, b, x) / a
+    return 1.0 - math.exp(log_front) * _beta_cf(b, a, 1.0 - x) / b
+
+
+def binom_sf(k, n, p):
+    """P(X >= k) for X ~ Binomial(n, p)."""
+    if k <= 0:
+        return 1.0
+    if k > n:
+        return 0.0
+    return betainc(k, n - k + 1, p)
+
+
+def betabinom_sf(k, n, p, dispersion):
+    """P(X >= k) for X ~ BetaBinomial(n, a, b) with mean p.
+
+    The beta-binomial adds variation of the success probability between
+    libraries to binomial sampling. With independent gamma-distributed rate
+    multipliers of variance `dispersion` in each of two libraries, the split of
+    reads between them is approximately Beta with a + b = 2 / dispersion.
+    `dispersion` 0 gives the binomial test.
+    """
+    if dispersion <= 0:
+        return binom_sf(k, n, p)
+    if k <= 0:
+        return 1.0
+    if k > n:
+        return 0.0
+    if p <= 0.0:
+        return 0.0
+    if p >= 1.0:
+        return 1.0
+    total = 2.0 / dispersion
+    a, b = p * total, (1.0 - p) * total
+
+    def log_pmf(x):
+        return (math.lgamma(n + 1) - math.lgamma(x + 1) - math.lgamma(n - x + 1)
+                + math.lgamma(x + a) + math.lgamma(n - x + b) - math.lgamma(n + a + b)
+                - math.lgamma(a) - math.lgamma(b) + math.lgamma(a + b))
+
+    def ratio(x):                      # pmf(x + 1) / pmf(x)
+        return (n - x) / (x + 1.0) * (x + a) / (n - x - 1.0 + b)
+
+    mean = n * p
+    if k > mean:                       # sum the upper tail from k upwards
+        term = math.exp(log_pmf(k))
+        total_p, x = term, k
+        while x < n and term > total_p * 1e-14:
+            term *= ratio(x)
+            x += 1
+            total_p += term
+        return min(1.0, total_p)
+    term = math.exp(log_pmf(k - 1))    # 1 - lower tail, summed downwards
+    lower, x = term, k - 1
+    while x > 0 and term > lower * 1e-14:
+        term /= ratio(x - 1)
+        x -= 1
+        lower += term
+    return max(0.0, 1.0 - lower)
+
+
+def estimate_dispersion(libraries, min_count=50):
+    """Between-library dispersion from replicate libraries.
+
+    For each pair of replicates, the variance of log(count share) differences at
+    positions with at least `min_count` reads in both is about 2 * dispersion
+    plus a Poisson part (1/x + 1/y); the median over pairs is returned, or
+    None with fewer than two libraries or too few positions.
+    """
+    if len(libraries) < 2:
+        return None
+    sizes = [total_signal(lib) or 1.0 for lib in libraries]
+    estimates = []
+    for i in range(len(libraries)):
+        for j in range(i + 1, len(libraries)):
+            diffs, poisson = [], []
+            for key, da in libraries[i].items():
+                db = libraries[j].get(key, {})
+                for pos, x in da.items():
+                    y = db.get(pos, 0.0)
+                    if x >= min_count and y >= min_count:
+                        diffs.append(math.log(x / sizes[i]) - math.log(y / sizes[j]))
+                        poisson.append(1.0 / x + 1.0 / y)
+            if len(diffs) >= 50:
+                mean = sum(diffs) / len(diffs)
+                var = sum((d - mean) ** 2 for d in diffs) / (len(diffs) - 1)
+                estimates.append(max(0.0, (var - sum(poisson) / len(poisson)) / 2.0))
+    if not estimates:
+        return None
+    estimates.sort()
+    return estimates[len(estimates) // 2]
+
+
+DEFAULT_DISPERSION = 0.05
+
+
+def chi2_sf_even(x, dof):
+    """Upper tail of a chi-squared distribution with an even number of degrees."""
+    half, term, total = x / 2.0, 1.0, 1.0
+    for i in range(1, dof // 2):
+        term *= half / i
+        total += term
+    return min(1.0, math.exp(-half) * total)
+
+
+def fisher_combine(pvalues):
+    """Fisher's method: combined p-value of independent tests."""
+    pvalues = [max(p, 1e-300) for p in pvalues]
+    if len(pvalues) == 1:
+        return pvalues[0]
+    return chi2_sf_even(-2.0 * sum(math.log(p) for p in pvalues), 2 * len(pvalues))
+
+
+def bh_qvalues(pvalues):
+    """Benjamini-Hochberg adjusted p-values (q-values), in input order."""
+    n = len(pvalues)
+    order = sorted(range(n), key=lambda i: pvalues[i], reverse=True)
+    q = [0.0] * n
+    running = 1.0
+    for rank, i in enumerate(order):
+        running = min(running, pvalues[i] * n / (n - rank))
+        q[i] = running
+    return q
+
+
+def library_size(signal, exclude=None):
+    """Reads in a library, optionally leaving out reads that start in the
+    regions of `exclude` (a GeneIndex, e.g. of rRNA and tRNA genes)."""
+    if exclude is None:
+        return total_signal(signal)
+    size = 0.0
+    for (seqid, _), positions in signal.items():
+        for pos, value in positions.items():
+            if not exclude.overlapping(seqid, pos, pos):
+                size += value
+    return size
+
+
+def call_binomial(enriched, controls, fdr=0.05, min_fold=1.0, min_reads=3,
+                  min_replicates=None, exclude=None, dispersion=0.0):
+    """Call TSS by testing enriched against control counts at each position.
+
+    For one replicate, with enriched count E, control count C and library
+    sizes Ne and Nc, the null hypothesis is that the position is enriched by
+    at most `min_fold`: under it E ~ Binomial(E + C, p0) with
+    p0 = f*Ne / (f*Ne + Nc). The one-sided p-value is P(X >= E). Replicates
+    are combined with Fisher's method, positions with at least `min_reads`
+    reads in some replicate are tested, and positions with a Benjamini-Hochberg
+    q-value <= `fdr` whose enrichment (point estimate) exceeds `min_fold` in at
+    least `min_replicates` replicates (default: all) are called. Library sizes
+    leave out reads in `exclude` (e.g. rRNA and tRNA genes), so an
+    rRNA-dominated control does not make every other position look enriched.
+    With `dispersion` > 0 the beta-binomial replaces the binomial, allowing for
+    variation between libraries beyond sampling noise.
+    """
+    if not controls or len(controls) != len(enriched):
+        raise ValueError("Statistical calling needs one control per enriched library")
+    reps = len(enriched)
+    min_replicates = reps if min_replicates is None else min_replicates
+    e_size = [library_size(lib, exclude) or 1.0 for lib in enriched]
+    c_size = [library_size(lib, exclude) or 1.0 for lib in controls]
+    p0 = [min_fold * e / (min_fold * e + c) for e, c in zip(e_size, c_size)]
+
+    keys = set()
+    for lib in enriched:
+        for (seqid, strand), positions in lib.items():
+            keys.update((seqid, strand, pos) for pos, v in positions.items() if v >= min_reads)
+
+    tested = []
+    for seqid, strand, pos in keys:
+        pvals, e_rpm, c_rpm, fcs, passed = [], [], [], [], 0
+        for i in range(reps):
+            e = enriched[i].get((seqid, strand), {}).get(pos, 0.0)
+            c = controls[i].get((seqid, strand), {}).get(pos, 0.0)
+            pvals.append(betabinom_sf(int(round(e)), int(round(e + c)), p0[i], dispersion))
+            er, cr = e / e_size[i] * 1e6, c / c_size[i] * 1e6
+            fc = math.log2((er + 1e-9) / (cr + 1e-9)) if er or cr else float("nan")
+            e_rpm.append(er)
+            c_rpm.append(cr)
+            fcs.append(fc)
+            passed += e * c_size[i] > min_fold * c * e_size[i]
+        tested.append((seqid, strand, pos, fisher_combine(pvals), e_rpm, c_rpm, fcs, passed))
+
+    qvals = bh_qvalues([t[3] for t in tested])
+    calls = []
+    for (seqid, strand, pos, p, e_rpm, c_rpm, fcs, passed), q in zip(tested, qvals):
+        if q <= fdr and passed >= min_replicates:
+            finite = [f for f in fcs if f == f and abs(f) != float("inf")]
+            tss = TSS(seqid, pos, strand, sum(e_rpm) / reps, sum(c_rpm) / reps,
+                      sum(finite) / len(finite) if finite else float("inf"), passed)
+            tss.pvalue, tss.qvalue = p, q
+            calls.append(tss)
+    calls.sort(key=lambda t: t.key)
+    return calls
 
 
 # ---------------------------------------------------------------------------
@@ -457,6 +695,10 @@ def _utr_text(tss):
     return "Orphan_NA" if "Orphan" in tss.classes else "NA"
 
 
+def _fmt_p(value):
+    return "NA" if value != value else "%.3g" % value
+
+
 def _fmt(value):
     return "NA" if value != value else "%.3f" % value   # NaN check
 
@@ -476,6 +718,8 @@ def write_gff(tss_list, path, source="ANNOgesic-Cappable"):
                 "log2_enrichment=%s" % _fmt(tss.log2fc),
                 "replicates=%d" % tss.replicates,
             ]
+            if tss.qvalue == tss.qvalue:
+                attrs += ["pvalue=%.3g" % tss.pvalue, "qvalue=%.3g" % tss.qvalue]
             out.write("\t".join([tss.seqid, source, "TSS", str(tss.pos),
                                  str(tss.pos), _fmt(tss.enriched_rpm),
                                  tss.strand, ".", ";".join(attrs)]) + "\n")
@@ -484,7 +728,7 @@ def write_gff(tss_list, path, source="ANNOgesic-Cappable"):
 def write_table(tss_list, path):
     header = ["seqid", "position", "strand", "type", "associated_gene",
               "UTR_length", "enriched_rpm", "control_rpm", "log2_enrichment",
-              "replicates"]
+              "replicates", "pvalue", "qvalue"]
     with open(path, "w") as out:
         out.write("\t".join(header) + "\n")
         for tss in tss_list:
@@ -492,6 +736,7 @@ def write_table(tss_list, path):
                 tss.seqid, str(tss.pos), tss.strand, _class_text(tss),
                 _gene_text(tss), _utr_text(tss), _fmt(tss.enriched_rpm),
                 _fmt(tss.control_rpm), _fmt(tss.log2fc), str(tss.replicates),
+                _fmt_p(tss.pvalue), _fmt_p(tss.qvalue),
             ]) + "\n")
 
 
@@ -856,6 +1101,28 @@ def build_parser():
     call.add_argument("--feature-types", default="gene",
                       help="Comma-separated GFF feature types used as genes "
                            "(default: gene; CDS is a common alternative)")
+    call.add_argument("--method", choices=("cutoff", "binomial"), default="cutoff",
+                      help="cutoff: fixed RPM and enrichment cut-offs (the presets); "
+                           "binomial: test enriched against control counts at each "
+                           "position with a false-discovery rate (needs --control). "
+                           "Default: cutoff")
+    call.add_argument("--fdr", type=float, default=0.05,
+                      help="binomial: false-discovery rate (default 0.05)")
+    call.add_argument("--min-fold", type=float, default=1.0,
+                      help="binomial: enrichment over the control that the test must "
+                           "exceed (default 1, i.e. any enrichment)")
+    call.add_argument("--min-reads", type=int, default=3,
+                      help="binomial: test only positions with at least this many reads "
+                           "in one enriched library (default 3)")
+    call.add_argument("--dispersion", default="auto",
+                      help="binomial: variation between libraries beyond sampling noise "
+                           "(beta-binomial test); 'auto' estimates it from enriched "
+                           "replicates, or uses %g with one replicate; 0 gives the plain "
+                           "binomial test (default auto)" % DEFAULT_DISPERSION)
+    call.add_argument("--normalise", choices=("total", "exclude-rna"), default="exclude-rna",
+                      help="binomial: library sizes from all reads, or leaving out reads "
+                           "in rRNA and tRNA genes of --annotation (default exclude-rna; "
+                           "falls back to total without an annotation)")
     call.add_argument("--preset", choices=sorted(PRESETS), default="default",
                       help="Starting set of thresholds; 'ettwiller2016' "
                            "reproduces Ettwiller et al. 2016. Options given "
@@ -870,8 +1137,9 @@ def build_parser():
     call.add_argument("--control-floor", type=float,
                       help="Minimum control read count used in the ratio "
                            "(default 0)")
-    call.add_argument("--min-replicates", type=int, default=1,
-                      help="Replicates in which a position must pass (default 1)")
+    call.add_argument("--min-replicates", type=int,
+                      help="Replicates in which a position must pass (default: 1 for "
+                           "cutoff, all for binomial)")
     call.add_argument("--cluster-distance", type=int,
                       help="Merge TSS on the same strand no more than this "
                            "many nt apart; 0 disables (default 5)")
@@ -982,12 +1250,36 @@ def main(argv=None):
         sys.stderr.write("Stopping: %d librar%s failed the check (--strict-qc).\n"
                          % (flagged, "y" if flagged == 1 else "ies"))
         return 2
-    calls = call_positions(enriched, controls, min_rpm=settings["min_rpm"],
-                           min_log2fc=settings["min_log2fc"],
-                           min_replicates=args.min_replicates,
-                           pseudocount=settings["pseudocount"],
-                           control_floor=settings["control_floor"],
-                           rpm_decimals=settings["rpm_decimals"])
+    min_replicates = args.min_replicates
+    if args.method == "binomial":
+        if len(controls) != len(enriched):
+            sys.stderr.write("--method binomial needs one --control per --enriched library\n")
+            return 1
+        exclude = None
+        if args.normalise == "exclude-rna":
+            if args.annotation:
+                exclude = GeneIndex(read_genes(args.annotation, ("rRNA", "tRNA")))
+            else:
+                sys.stderr.write("No --annotation: library sizes include rRNA/tRNA reads\n")
+        if args.dispersion == "auto":
+            dispersion = estimate_dispersion(enriched)
+            source = "estimated from replicates"
+            if dispersion is None:
+                dispersion, source = DEFAULT_DISPERSION, "default (one replicate)"
+        else:
+            dispersion, source = float(args.dispersion), "given"
+        sys.stderr.write("Dispersion %.4f (%s)\n" % (dispersion, source))
+        calls = call_binomial(enriched, controls, fdr=args.fdr, min_fold=args.min_fold,
+                              min_reads=args.min_reads, dispersion=dispersion,
+                              min_replicates=min_replicates or len(enriched),
+                              exclude=exclude)
+    else:
+        calls = call_positions(enriched, controls, min_rpm=settings["min_rpm"],
+                               min_log2fc=settings["min_log2fc"],
+                               min_replicates=min_replicates or 1,
+                               pseudocount=settings["pseudocount"],
+                               control_floor=settings["control_floor"],
+                               rpm_decimals=settings["rpm_decimals"])
     calls = cluster_tss(calls, settings["cluster_distance"])
     if genes is not None:
         classify(calls, genes, args.utr_length, args.antisense_distance)

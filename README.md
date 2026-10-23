@@ -91,6 +91,45 @@ data, this preset gives exactly the same TSS as running Ettwiller's scripts
 reads (Ettwiller et al. used Bowtie2 in local mode) and do not filter on
 `--min-mapq`, because their read total counts every mapped read.
 
+#### Statistical calling (`--method binomial`)
+
+Fixed RPM cut-offs ignore depth: a 1.5 RPM threshold means 3 reads in a
+2-million-read library and 30 reads in a 20-million-read one, and a log2
+ratio of 0 is passed by chance at many positions with only a few reads.
+`--method binomial` instead tests each position:
+
+* With enriched count E, control count C and library sizes Ne and Nc, the
+  null hypothesis is that the position is enriched at most `--min-fold`
+  times (default 1). Under it, E out of E + C reads fall in the enriched
+  library with probability p0 = f·Ne / (f·Ne + Nc), and the p-value is
+  P(X ≥ E).
+* X is beta-binomial rather than binomial, because libraries differ by
+  more than sampling noise. `--dispersion auto` (the default) estimates the
+  variance of this extra variation from the enriched replicates, or uses
+  0.05 when there is only one. Public data gave 0.01–0.05; with
+  `--dispersion 0` (the plain binomial test), false calls appear when
+  libraries vary.
+* Library sizes leave out reads in rRNA and tRNA genes of `--annotation`
+  (`--normalise exclude-rna`, the default). Otherwise a control dominated by
+  rRNA makes every other position look enriched.
+* Replicates are combined with Fisher's method, and q-values are computed
+  with the Benjamini–Hochberg procedure. A position is called if q ≤ `--fdr`
+  (default 0.05) and the enrichment exceeds `--min-fold` in at least
+  `--min-replicates` replicates (default all). Only positions with at least
+  `--min-reads` (default 3) reads in an enriched library are tested.
+* The GFF and table gain `pvalue` and `qvalue` columns. Clustering and
+  classification are as above.
+
+```bash
+python cappable_tss.py call --method binomial \
+    --enriched enr_rep1.bam enr_rep2.bam \
+    --control  ctl_rep1.bam ctl_rep2.bam \
+    --annotation genome.gff --feature-types CDS \
+    --out-prefix results/TSS
+```
+
+Calibration checks and results are in `benchmarks/README.md`.
+
 Input notes:
 
 * **BAM**: unmapped, secondary, supplementary and QC-fail reads are

@@ -40,7 +40,7 @@ CLASSES = ("Primary", "Secondary", "Internal", "Antisense", "Orphan")
 # objects; n replicates are passed implicitly as len(enriched).
 # ---------------------------------------------------------------------------
 
-def method_ettwiller2016(enriched, controls):
+def method_ettwiller2016(enriched, controls, ctx=None):
     """Published Cappable-seq pipeline; with replicates, TSS in all of them."""
     preset = dict(ct.PRESETS["ettwiller2016"])
     distance = preset.pop("cluster_distance")
@@ -48,15 +48,51 @@ def method_ettwiller2016(enriched, controls):
     return ct.cluster_tss(calls, distance)
 
 
-def method_suliman2025(enriched, controls):
+def method_suliman2025(enriched, controls, ctx=None):
     """Suliman et al. 2025: >= 10 CPM, 10 nt clusters, all replicates, no control."""
     calls = ct.call_positions(enriched, [], min_rpm=10.0, min_replicates=len(enriched))
     return ct.cluster_tss(calls, 10)
 
 
+def _binomial(enriched, controls, ctx, min_fold, dispersion=0.0):
+    if not controls:
+        return None                       # needs a control library
+    if dispersion == "auto":              # as `call --dispersion auto`
+        dispersion = ct.estimate_dispersion(enriched)
+        if dispersion is None:
+            dispersion = ct.DEFAULT_DISPERSION
+    calls = ct.call_binomial(enriched, controls, fdr=0.05, min_fold=min_fold,
+                             exclude=(ctx or {}).get("exclude"), dispersion=dispersion)
+    return ct.cluster_tss(calls, 6)
+
+
+def method_binomial(enriched, controls, ctx=None):
+    """Binomial test against the control, FDR 5%, any enrichment, rRNA/tRNA excluded."""
+    return _binomial(enriched, controls, ctx, 1.0)
+
+
+def method_binomial_fold2(enriched, controls, ctx=None):
+    """As binomial, but the null hypothesis is enrichment of at most 2-fold."""
+    return _binomial(enriched, controls, ctx, 2.0)
+
+
+def method_betabinom(enriched, controls, ctx=None):
+    """Beta-binomial test (dispersion estimated from replicates, else 0.05), FDR 5%."""
+    return _binomial(enriched, controls, ctx, 1.0, "auto")
+
+
+def method_betabinom_fold2(enriched, controls, ctx=None):
+    """As betabinom, but the null hypothesis is enrichment of at most 2-fold."""
+    return _binomial(enriched, controls, ctx, 2.0, "auto")
+
+
 METHODS = {
     "ettwiller2016": method_ettwiller2016,
     "suliman2025": method_suliman2025,
+    "binomial": method_binomial,
+    "binomial_fold2": method_binomial_fold2,
+    "betabinom": method_betabinom,
+    "betabinom_fold2": method_betabinom_fold2,
 }
 
 
@@ -218,6 +254,7 @@ def evaluate_real(ds, data_dir, methods, downsample, cache_dir, seed=0):
     controls = [load_signal(path(p), mate, mapq, cache_dir) for p in ds.get("control", [])]
     seq = read_fasta(path(ds["genome"]))[chrom]
     genes = ct.read_genes(path(ds["annotation"]), tuple(ds.get("feature_types", ["CDS"])))
+    ctx = {"exclude": ct.GeneIndex(ct.read_genes(path(ds["annotation"]), ("rRNA", "tRNA")))}
     reference = None
     if ds.get("reference"):
         reference = [(st, p) for s, st, p in ct.read_sites(path(ds["reference"]))
@@ -231,7 +268,9 @@ def evaluate_real(ds, data_dir, methods, downsample, cache_dir, seed=0):
         run = METHODS[name]
         # Controls are used only when there is one per enriched library.
         ctl = controls if len(controls) == len(enriched) else []
-        tss = run(enriched, ctl)
+        tss = run(enriched, ctl, ctx)
+        if tss is None:
+            continue
         ct.classify(tss, genes)
         chrom_tss = on_chrom(tss, chrom)
         sites = as_sites(chrom_tss)
@@ -256,15 +295,15 @@ def evaluate_real(ds, data_dir, methods, downsample, cache_dir, seed=0):
             for i in range(len(enriched)):
                 rest = enriched[:i] + enriched[i + 1:]
                 rest_ctl = ctl[:i] + ctl[i + 1:] if ctl else []
-                train = as_sites(on_chrom(run(rest, rest_ctl), chrom))
-                held = as_sites(on_chrom(run([enriched[i]], [ctl[i]] if ctl else []), chrom))
+                train = as_sites(on_chrom(run(rest, rest_ctl, ctx), chrom))
+                held = as_sites(on_chrom(run([enriched[i]], [ctl[i]] if ctl else [], ctx), chrom))
                 support.append(match(train, held, 2) / len(train) if train else float("nan"))
             out["loo_support"] = statistics.mean(support)
         rng = np.random.default_rng(seed)
         for frac in downsample:
             thin_e = [thin(s, frac, rng) for s in enriched]
             thin_c = [thin(s, frac, rng) for s in ctl]
-            sub = as_sites(on_chrom(run(thin_e, thin_c), chrom))
+            sub = as_sites(on_chrom(run(thin_e, thin_c, ctx), chrom))
             out["down%g_n" % frac] = len(sub)
             out["down%g_recovery" % frac] = match(sites, sub, 2) / len(sites) if sites else float("nan")
         rows.append(out)
@@ -286,8 +325,12 @@ def evaluate_sim(methods, depths, seed=0, label="sim", controls=(False, True), *
             for (_, st, p), s in sim["strength"].items():
                 tiers["weak" if s < cut1 else "medium" if s < cut2 else "strong"].append((st, p))
             processed = [(st, p) for _, st, p in sim["processed"]]
+            ctx = {"exclude": ct.GeneIndex([ct.Gene(simulate.SEQID, sim["rrna_block"][0],
+                                                    sim["rrna_block"][1], "+", "rRNA")])}
             for name in methods:
-                tss = METHODS[name](sim["enriched"], sim["controls"])
+                tss = METHODS[name](sim["enriched"], sim["controls"], ctx)
+                if tss is None:
+                    continue
                 sites = as_sites(tss)
                 tp = match(sites, truth, 3)
                 out = collections.OrderedDict(dataset="%s_depth%g" % (kind, depth), method=name,
@@ -370,7 +413,7 @@ def main(argv=None):
                               args.cache_dir or args.out + "_cache")
             chrom = ds["chromosome"]
             sig = {k: v for k, v in sig.items() if k[0] == chrom}
-            called = method_ettwiller2016([sig], [])
+            called = method_ettwiller2016([sig], [], None)
             length = len(read_fasta(p(ds["genome"]))[chrom])
             params = simulate.profile_from_signal(sig, [t.key for t in called], length)
             label = "sim_" + args.profile

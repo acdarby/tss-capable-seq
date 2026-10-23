@@ -148,7 +148,7 @@ def simulate(length=1_000_000, n_tss=1000, replicates=3, depth=1.0,
     enriched_rate = library(1.0, 1.0, processed_strength * 0.05, 0.0)
     out = {"enriched": [replicate(enriched_rate) for _ in range(replicates)],
            "controls": [], "truth": truth, "strength": strength, "processed": processed,
-           "length": length}
+           "length": length, "rrna_block": (length // 2 + 1, length // 2 + 5000)}
     if with_control:
         control_rate = library(control_tss_factor, control_background, processed_strength,
                                rrna_fraction)

@@ -1,7 +1,9 @@
+import math
 import os
 import sys
 import tempfile
 import unittest
+from fractions import Fraction
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -294,6 +296,135 @@ class BamTests(unittest.TestCase):
         # read 2 reverse at 199..218 -> 5' end 219, plus the single-end read
         self.assertEqual(dict(mate2[("chr", "-")]), {219: 1, 319: 1})
 
+
+
+def exact_betabinom_sf(k, n, p, dispersion):
+    """Reference beta-binomial tail: every term summed in log space."""
+    a, b = p * 2.0 / dispersion, (1.0 - p) * 2.0 / dispersion
+    logs = [math.lgamma(n + 1) - math.lgamma(x + 1) - math.lgamma(n - x + 1)
+            + math.lgamma(x + a) + math.lgamma(n - x + b) - math.lgamma(n + a + b)
+            - math.lgamma(a) - math.lgamma(b) + math.lgamma(a + b) for x in range(k, n + 1)]
+    top = max(logs)
+    return math.exp(top) * sum(math.exp(v - top) for v in logs)
+
+
+class StatisticsTests(unittest.TestCase):
+    """Checked against exact sums (SciPy's betabinom.sf loses precision far
+    in the tail, so it is not used as the reference)."""
+
+    def test_binom_sf_matches_exact_sum(self):
+        for n in (1, 5, 40, 300):
+            for p in (0.01, 0.3, 0.5, 0.97):
+                for k in sorted({0, 1, n // 3, n // 2, n - 1, n, n + 1}):
+                    exact = sum(Fraction(math.comb(n, x)) * Fraction(p) ** x
+                                * Fraction(1 - p) ** (n - x) for x in range(max(k, 0), n + 1))
+                    exact = float(exact)
+                    got = ct.binom_sf(k, n, p)
+                    self.assertAlmostEqual(got, exact, delta=1e-9 * max(exact, 1e-300),
+                                           msg=(k, n, p))
+
+    def test_betabinom_sf_matches_exact_sum(self):
+        for n in (1, 3, 10, 50, 300, 2000):
+            for d in (0.01, 0.05, 0.3):
+                for p in (0.01, 0.3, 0.5, 0.9):
+                    for k in sorted(k for k in {1, 2, n // 4, n // 2, (3 * n) // 4, n} if 1 <= k <= n):
+                        exact = exact_betabinom_sf(k, n, p, d)
+                        got = ct.betabinom_sf(k, n, p, d)
+                        self.assertLess(abs(got - exact), 1e-9 * exact + 1e-15,
+                                        msg=(k, n, p, d))
+
+    def test_betabinom_limits(self):
+        self.assertEqual(ct.betabinom_sf(0, 10, 0.3, 0.1), 1.0)
+        self.assertEqual(ct.betabinom_sf(11, 10, 0.3, 0.1), 0.0)
+        self.assertEqual(ct.betabinom_sf(4, 10, 0.3, 0.0), ct.binom_sf(4, 10, 0.3))
+        # Tiny dispersion approaches the binomial; larger dispersion fattens the tail.
+        self.assertAlmostEqual(ct.betabinom_sf(40, 100, 0.3, 1e-7), ct.binom_sf(40, 100, 0.3),
+                               delta=1e-5)
+        self.assertGreater(ct.betabinom_sf(40, 100, 0.3, 0.1), ct.binom_sf(40, 100, 0.3))
+
+    def test_fisher_combine(self):
+        self.assertAlmostEqual(ct.fisher_combine([0.2]), 0.2)
+        # -2 * sum(log p) with 4 degrees of freedom: sf = exp(-x/2) * (1 + x/2).
+        x = -2 * (math.log(0.01) + math.log(0.04))
+        self.assertAlmostEqual(ct.fisher_combine([0.01, 0.04]), math.exp(-x / 2) * (1 + x / 2))
+        self.assertEqual(ct.fisher_combine([1.0, 1.0]), 1.0)
+
+    def test_bh_qvalues(self):
+        p = [0.01, 0.04, 0.03, 0.2]
+        # Sorted: 0.01, 0.03, 0.04, 0.2 -> raw 0.04, 0.06, 0.0533, 0.2; cumulative minimum
+        # from the top gives 0.04, 0.0533, 0.0533, 0.2.
+        expected = [0.04, 0.16 / 3, 0.16 / 3, 0.2]
+        for got, want in zip(ct.bh_qvalues(p), expected):
+            self.assertAlmostEqual(got, want)
+        self.assertEqual(ct.bh_qvalues([]), [])
+
+    def test_estimate_dispersion(self):
+        import random
+        rng = random.Random(1)
+
+        def poisson(mean):
+            # Normal approximation is adequate for means of 100 or more.
+            return max(0, int(round(rng.gauss(mean, math.sqrt(mean)))))
+
+        for true in (0.0, 0.05):
+            libs = [{("c", "+"): {}} for _ in range(3)]
+            for pos in range(1, 2001):
+                rate = 200.0
+                for lib in libs:
+                    mult = rng.gammavariate(1 / true, true) if true else 1.0
+                    lib[("c", "+")][pos] = float(poisson(rate * mult))
+            est = ct.estimate_dispersion(libs)
+            self.assertAlmostEqual(est, true, delta=0.01, msg=true)
+        self.assertIsNone(ct.estimate_dispersion([libs[0]]))
+
+    def null_pair(self, rng, mult_sd=0.0, n=3000):
+        enr, ctl = {("c", "+"): {}}, {("c", "+"): {}}
+        for pos in range(1, n + 1):
+            rate = math.exp(rng.gauss(3.0, 1.0))
+            for lib in (enr, ctl):
+                mult = rng.gammavariate(1 / mult_sd, mult_sd) if mult_sd else 1.0
+                lam, k, t = rate * mult, 0, rng.expovariate(1.0)
+                while t < lam:          # Poisson by exponential waiting times
+                    k += 1
+                    t += rng.expovariate(1.0)
+                if k:
+                    lib[("c", "+")][pos] = float(k)
+        return enr, ctl
+
+    def test_call_binomial_finds_enriched_site_only(self):
+        import random
+        enr, ctl = self.null_pair(random.Random(2))
+        enr[("c", "+")][5000] = 200.0
+        ctl[("c", "+")][5000] = 5.0
+        calls = ct.call_binomial([enr], [ctl], fdr=0.05)
+        self.assertEqual([t.pos for t in calls], [5000])
+        self.assertLess(calls[0].qvalue, 1e-10)
+
+    def test_call_binomial_calibrated_under_null(self):
+        import random
+        # With extra-library variation the binomial gives false calls; the
+        # beta-binomial with the right dispersion should give (almost) none.
+        enr, ctl = self.null_pair(random.Random(3), mult_sd=0.1)
+        plain = ct.call_binomial([enr], [ctl], fdr=0.05)
+        bb = ct.call_binomial([enr], [ctl], fdr=0.05, dispersion=0.1)
+        self.assertGreater(len(plain), 5)
+        self.assertLessEqual(len(bb), 2)
+
+    def test_call_binomial_replicates_and_exclusion(self):
+        enr1 = {("c", "+"): {100: 50.0, 300: 50.0, 2000: 1000.0}}
+        ctl1 = {("c", "+"): {100: 1.0, 300: 50.0, 2000: 50000.0}}
+        enr2 = {("c", "+"): {100: 40.0, 300: 2.0, 2000: 1000.0}}
+        ctl2 = {("c", "+"): {100: 1.0, 300: 60.0, 2000: 50000.0}}
+        rrna = ct.GeneIndex([ct.Gene("c", 1900, 2100, "+", "rrs")])
+        both = ct.call_binomial([enr1, enr2], [ctl1, ctl2], exclude=rrna)
+        self.assertEqual([t.pos for t in both], [100])
+        # Without excluding the rRNA block, the control looks huge and position
+        # 300 (no enrichment) becomes significant.
+        loose = ct.call_binomial([enr1], [ctl1])
+        self.assertIn(300, [t.pos for t in loose])
+        self.assertNotIn(300, [t.pos for t in ct.call_binomial([enr1], [ctl1], exclude=rrna)])
+        with self.assertRaises(ValueError):
+            ct.call_binomial([enr1, enr2], [ctl1])
 
 if __name__ == "__main__":
     unittest.main()
