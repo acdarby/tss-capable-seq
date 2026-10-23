@@ -1,0 +1,19 @@
+dataset	method	dispersion	tested	p_below_0.05	p_below_0.01	calls_fdr5	calls_fdr1
+simulated null (no enrichment), depth 1, true dispersion 0	binomial	0.000	15498	0.021	0.002	0	0
+simulated null (no enrichment), depth 0.25, true dispersion 0	binomial	0.000	2526	0.024	0.004	0	0
+simulated null (no enrichment), depth 1, true dispersion 0.05	binomial	0.000	16135	0.040	0.014	87	64
+simulated null (no enrichment), depth 1, true dispersion 0.1	binomial	0.000	16570	0.055	0.020	169	118
+split enriched library into halves	binomial	0.000	3318	0.027	0.004	0	0
+enriched replicate 1 against replicate 2	binomial	0.000	5222	0.109	0.035	53	44
+simulated null (no enrichment), depth 1, true dispersion 0	betabinom	0.020	15498	0.017	0.001	0	0
+simulated null (no enrichment), depth 0.25, true dispersion 0	betabinom	0.020	2526	0.017	0.002	0	0
+simulated null (no enrichment), depth 1, true dispersion 0.05	betabinom	0.020	16135	0.031	0.006	1	1
+simulated null (no enrichment), depth 1, true dispersion 0.1	betabinom	0.020	16570	0.045	0.012	28	14
+split enriched library into halves	betabinom	0.020	3332	0.015	0.001	0	0
+enriched replicate 1 against replicate 2	betabinom	0.020	5222	0.090	0.019	11	6
+simulated null (no enrichment), depth 1, true dispersion 0	betabinom	0.050	15498	0.015	0.000	0	0
+simulated null (no enrichment), depth 0.25, true dispersion 0	betabinom	0.050	2526	0.013	0.000	0	0
+simulated null (no enrichment), depth 1, true dispersion 0.05	betabinom	0.050	16135	0.026	0.002	0	0
+simulated null (no enrichment), depth 1, true dispersion 0.1	betabinom	0.050	16570	0.038	0.005	0	0
+split enriched library into halves	betabinom	0.050	3301	0.018	0.001	0	0
+enriched replicate 1 against replicate 2	betabinom	0.050	5222	0.049	0.012	3	1

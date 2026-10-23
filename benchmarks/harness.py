@@ -394,6 +394,9 @@ def main(argv=None):
     sim.add_argument("--data-dir")
     sim.add_argument("--manifest", default=os.path.join(HERE, "datasets.toml"))
     sim.add_argument("--replicates", type=int, default=3)
+    sim.add_argument("--dispersion", type=float, default=0.1,
+                     help="Variance of the per-library rate multipliers (default 0.1; "
+                          "replicates of the public data give 0.01-0.05)")
     sim.add_argument("--cache-dir")
     sim.add_argument("--out", required=True)
     args = parser.parse_args(argv)
@@ -418,8 +421,10 @@ def main(argv=None):
             params = simulate.profile_from_signal(sig, [t.key for t in called], length)
             label = "sim_" + args.profile
             print("profile %s: %s" % (args.profile, params), file=sys.stderr)
+        if args.dispersion != 0.1:
+            label += "_disp%g" % args.dispersion
         rows = evaluate_sim(methods, depths, seed=args.seed, label=label,
-                            replicates=args.replicates, **params)
+                            replicates=args.replicates, dispersion=args.dispersion, **params)
     else:
         with open(args.manifest, "rb") as handle:
             datasets = tomllib.load(handle)["dataset"]

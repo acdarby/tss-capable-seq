@@ -89,16 +89,16 @@ Each one is an option that stays off by default until it passes sections 5 and 6
 - [x] **A. Library-type check**: share of reads at the 1,000 busiest start
       positions, strand of reads inside genes, insert size; warn when a
       library does not look like 5'-end data (would have flagged PRJNA1392518).
-- [ ] **B. Normalisation**: size factors from reads outside rRNA and tRNA
+- [x] **B. Normalisation**: size factors from reads outside rRNA and tRNA
       genes, or median-of-ratios over shared positions, so log2 enrichment 0
       means "no different from the control".
-- [ ] **C. Test against the control**: one-sided binomial test of enriched
+- [x] **C. Test against the control**: one-sided binomial test of enriched
       against control counts at each position, with an optional minimum fold
       change.
 - [ ] **D. Test against local background** (no control): Poisson or
       negative-binomial test of the position against read starts in the
       surrounding ±50–200 nt, excluding the cluster itself.
-- [ ] **E. False-discovery rate**: Benjamini–Hochberg q-values over tested
+- [x] **E. False-discovery rate**: Benjamini–Hochberg q-values over tested
       positions (positions with ≥ 2–3 reads).
 - [ ] **F. Replicates as evidence**: combine per-replicate p-values (Fisher)
       with a direction check; report a reproducibility score per TSS.
@@ -120,7 +120,7 @@ on biology in section 6.
 
 **Correctness of the arithmetic**
 
-- [ ] Unit tests: binomial and Poisson tail probabilities, Fisher's combined
+- [x] Unit tests: binomial and Poisson tail probabilities, Fisher's combined
       p-value and Benjamini–Hochberg q-values against reference values
       computed independently (e.g. with SciPy in the test suite only).
 - [ ] Edge cases: zero control reads, zero background, a single replicate,
@@ -128,27 +128,27 @@ on biology in section 6.
 
 **Calibration under the null (no false discoveries expected)**
 
-- [ ] Simulated null: libraries with no planted TSS. p-values must be close
+- [x] (C done; D to do) Simulated null: libraries with no planted TSS. p-values must be close
       to uniform (QQ plot) and the FDR at 1%, 5%, 10% must hold.
-- [ ] Real-data null for test C: split one library into two halves by random
+- [x] Real-data null for test C: split one library into two halves by random
       read sampling (control vs control, and enriched vs enriched); calls at
       a given FDR should be about that fraction of tests, not thousands.
-- [ ] Real-data null for test C: swap enriched and control labels (*E. coli*);
+- [x] Real-data null for test C: swap enriched and control labels (*E. coli*);
       the "TSS" called should be processed ends (tRNA/rRNA), not promoters.
 - [ ] Real-data null for test D: positions shifted 100 nt and randomly placed
       positions with the same read count; the call rate at a given FDR should
       be near the nominal level.
-- [ ] Dispersion check: across the Suliman triplicates, compare variance with
+- [x] Dispersion check: across the Suliman triplicates, compare variance with
       mean per position; if the variance clearly exceeds the mean, the
       Poisson tests are anti-conservative and approach F/I must use a
       negative-binomial model instead.
 
 **Power and robustness**
 
-- [ ] Simulation with planted TSS of known strength at several depths
+- [x] (C done; D to do) Simulation with planted TSS of known strength at several depths
       (including *Wolbachia*-like 1–2 M reads): recall at fixed FDR compared
       with the fixed cut-offs, as power curves by TSS strength.
-- [ ] Downsampling the real libraries (50%, 25%, 10%): statistical calls
+- [x] (C done; D to do) Downsampling the real libraries (50%, 25%, 10%): statistical calls
       should lose weak TSS gradually; fixed RPM cut-offs change meaning with
       depth.
 - [ ] Parameter sensitivity: local-background window (±50, 100, 200 nt),
@@ -157,7 +157,7 @@ on biology in section 6.
 
 **Matched comparison with the fixed cut-offs**
 
-- [ ] For the same number of calls, compare statistical ranking with RPM
+- [x] For the same number of calls, compare statistical ranking with RPM
       ranking on the independent evidence: −10 box rate, orthogonal coverage
       rise in PRJNA1392518 (wAlbB), *E. coli* Table S1 recall, held-out
       replicate support. This separates "better ranking" from "more calls".
@@ -188,8 +188,12 @@ two of the symbiont datasets, and the result is written into the report.
 - [x] Implement A (library-type check): `qc` subcommand and checks in `call`;
       flags all fragment libraries (22–27% peak share) and passes all 5'-end
       libraries (77–97%; 42% for the E. coli control).
-- [ ] Implement B + C + E (control-based statistics); run the section 5
-      tests, then benchmark on *E. coli*.
+- [x] Implement B + C + E (control-based statistics); run the section 5
+      tests, then benchmark on *E. coli*. Result (benchmarks/README.md):
+      calibrated with a beta-binomial (dispersion 0.01–0.05 from replicates),
+      but ranks no better than RPM at matched size and has low power at low
+      depth; kept as `--method binomial`, not the default. Enrichment over the
+      control is best used as a filter; D is the main test to develop next.
 - [ ] Implement D + E (local background); run the section 5 tests, then
       benchmark on *Salmonella*, wAlbB, wMelPop-CLA, *Buchnera*.
 - [ ] Implement F (replicates); leave-one-out benchmark on the triplicates.

@@ -1,0 +1,6 @@
+dataset	method	n_tss	share_Primary	share_Secondary	share_Internal	share_Antisense	share_Orphan	box10_all	box35_all	box10_Primary	box10_Internal	box10_Antisense	box10_background	ref_precision_0	ref_recall_0	ref_precision_5	ref_recall_5	down0.5_n	down0.5_recovery	down0.25_n	down0.25_recovery
+ecoli	ettwiller2016	16639	0.159	0.233	0.450	0.279	0.032	0.247	0.078	0.364	0.190	0.316	0.027	0.943	0.959	0.951	0.968	17344	0.926	19185	0.893
+ecoli	binomial	11412	0.202	0.235	0.401	0.282	0.032	0.266	0.086	0.366	0.212	0.328	0.027	0.921	0.642	0.938	0.654	6864	0.575	4170	0.344
+ecoli	binomial_fold2	4560	0.340	0.212	0.317	0.248	0.038	0.297	0.106	0.380	0.243	0.339	0.024	0.891	0.248	0.910	0.254	2653	0.564	1602	0.338
+ecoli	betabinom	7259	0.255	0.220	0.365	0.275	0.036	0.280	0.094	0.367	0.232	0.331	0.027	0.887	0.394	0.918	0.407	4317	0.563	2506	0.327
+ecoli	betabinom_fold2	1271	0.426	0.146	0.263	0.260	0.045	0.295	0.106	0.372	0.231	0.361	0.025	0.832	0.065	0.865	0.067	738	0.533	434	0.317

@@ -128,7 +128,11 @@ python cappable_tss.py call --method binomial \
     --out-prefix results/TSS
 ```
 
-Calibration checks and results are in `benchmarks/README.md`.
+On the benchmarks (`benchmarks/README.md`) this test is well calibrated and
+does not call more noise at low depth, but it ranks TSS no better than read
+count and misses many weak TSS, because the control also contains TSS 5'
+ends. It is therefore not the default; use it when a calibrated error rate
+matters more than sensitivity.
 
 Input notes:
 

@@ -1,0 +1,25 @@
+dataset	method	dispersion	tested	p_below_0.05	p_below_0.01	calls_fdr5	calls_fdr1	clustered	share_in_rRNA_tRNA	box10
+simulated null (no enrichment), depth 1, true dispersion 0	binomial	0.000	15498	0.021	0.002	0	0			
+simulated null (no enrichment), depth 0.25, true dispersion 0	binomial	0.000	2526	0.024	0.004	0	0			
+simulated null (no enrichment), depth 1, true dispersion 0.05	binomial	0.000	16135	0.040	0.014	87	64			
+simulated null (no enrichment), depth 1, true dispersion 0.1	binomial	0.000	16570	0.055	0.020	169	118			
+split enriched library into halves	binomial	0.000	134215	0.029	0.004	0	0			
+split control library into halves	binomial	0.000	70856	0.033	0.005	0	0			
+label swap (control as enriched)	binomial	0.000	110267	0.735	0.695	80195	61139	18684	0.013	0.039
+real orientation (for comparison)	binomial	0.000	231864	0.151	0.100	19830	14997	11412	0.003	0.266
+simulated null (no enrichment), depth 1, true dispersion 0	betabinom	0.020	15498	0.017	0.001	0	0			
+simulated null (no enrichment), depth 0.25, true dispersion 0	betabinom	0.020	2526	0.017	0.002	0	0			
+simulated null (no enrichment), depth 1, true dispersion 0.05	betabinom	0.020	16135	0.031	0.006	1	1			
+simulated null (no enrichment), depth 1, true dispersion 0.1	betabinom	0.020	16570	0.045	0.012	28	14			
+split enriched library into halves	betabinom	0.020	133911	0.020	0.002	0	0			
+split control library into halves	betabinom	0.020	70822	0.016	0.002	0	0			
+label swap (control as enriched)	betabinom	0.020	110267	0.734	0.565	79973	60575	18666	0.013	0.039
+real orientation (for comparison)	betabinom	0.020	231864	0.146	0.089	16289	11435	9768	0.003	0.272
+simulated null (no enrichment), depth 1, true dispersion 0	betabinom	0.050	15498	0.015	0.000	0	0			
+simulated null (no enrichment), depth 0.25, true dispersion 0	betabinom	0.050	2526	0.013	0.000	0	0			
+simulated null (no enrichment), depth 1, true dispersion 0.05	betabinom	0.050	16135	0.026	0.002	0	0			
+simulated null (no enrichment), depth 1, true dispersion 0.1	betabinom	0.050	16570	0.038	0.005	0	0			
+split enriched library into halves	betabinom	0.050	134276	0.016	0.001	0	0			
+split control library into halves	betabinom	0.050	70787	0.012	0.000	0	0			
+label swap (control as enriched)	betabinom	0.050	110267	0.724	0.554	77837	60108	18042	0.014	0.036
+real orientation (for comparison)	betabinom	0.050	231864	0.130	0.073	11385	6491	7259	0.002	0.280
