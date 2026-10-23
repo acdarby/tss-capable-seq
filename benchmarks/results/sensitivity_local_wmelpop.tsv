@@ -1,0 +1,10 @@
+dataset	method	n_tss	box10_called	box10_top2000
+wmelpop	defaults	3924	0.530	0.570
+wmelpop	window=50	3925	0.530	0.573
+wmelpop	window=200	3921	0.528	0.565
+wmelpop	trim=0	3411	0.537	0.565
+wmelpop	trim=10	3966	0.527	0.575
+wmelpop	min_reads=2	3924	0.530	0.570
+wmelpop	min_reads=5	3455	0.539	0.570
+wmelpop	fdr=0.01	3890	0.532	0.570
+wmelpop	fdr=0.1	3937	0.529	0.570

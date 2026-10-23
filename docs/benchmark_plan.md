@@ -95,7 +95,7 @@ Each one is an option that stays off by default until it passes sections 5 and 6
 - [x] **C. Test against the control**: one-sided binomial test of enriched
       against control counts at each position, with an optional minimum fold
       change.
-- [ ] **D. Test against local background** (no control): Poisson or
+- [x] **D. Test against local background** (no control): Poisson or
       negative-binomial test of the position against read starts in the
       surrounding ±50–200 nt, excluding the cluster itself.
 - [x] **E. False-discovery rate**: Benjamini–Hochberg q-values over tested
@@ -151,7 +151,7 @@ on biology in section 6.
 - [x] (C done; D to do) Downsampling the real libraries (50%, 25%, 10%): statistical calls
       should lose weak TSS gradually; fixed RPM cut-offs change meaning with
       depth.
-- [ ] Parameter sensitivity: local-background window (±50, 100, 200 nt),
+- [x] Parameter sensitivity: local-background window (±50, 100, 200 nt),
       minimum read count (2, 3, 5), FDR level; results should not hinge on one
       setting.
 
@@ -194,8 +194,14 @@ two of the symbiont datasets, and the result is written into the report.
       but ranks no better than RPM at matched size and has low power at low
       depth; kept as `--method binomial`, not the default. Enrichment over the
       control is best used as a filter; D is the main test to develop next.
-- [ ] Implement D + E (local background); run the section 5 tests, then
-      benchmark on *Salmonella*, wAlbB, wMelPop-CLA, *Buchnera*.
+- [x] Implement D + E (local background); run the section 5 tests, then
+      benchmark on *Salmonella*, wAlbB, wMelPop-CLA, *Buchnera*. Result
+      (benchmarks/README.md): `--method local`; ranks at least as well as RPM
+      everywhere (much better in E. coli), 2–3.5× more TSS, mostly weak; a
+      negative binomial does not fit the uneven background, so the dispersion
+      is a setting and q-values are nominal; needs replicates. Buchnera to do.
+      Open: the real-data null for D (no clean null exists in 5'-end data:
+      the background is reproducible) and the choice of stop.
 - [ ] Implement F (replicates); leave-one-out benchmark on the triplicates.
 - [ ] Implement G (peak shape); benchmark base-level precision.
 - [ ] Turn `selftrain.py` into H (`learn` subcommand); benchmark promoter

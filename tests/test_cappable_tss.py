@@ -439,5 +439,74 @@ class StatisticsTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             ct.call_binomial([enr1, enr2], [ctl1])
 
+
+class LocalBackgroundTests(unittest.TestCase):
+    def test_poisson_and_nbinom_tails(self):
+        for mean in (0.01, 0.3, 2.0, 15.0, 200.0):
+            for k in (1, 2, 5, 20, 100, 400):
+                exact = sum(math.exp(i * math.log(mean) - mean - math.lgamma(i + 1))
+                            for i in range(k, k + 3000))
+                self.assertLess(abs(ct.poisson_sf(k, mean) - exact), 1e-9 * exact + 1e-300)
+                for d in (0.1, 1.0, 3.0):
+                    r = 1.0 / d
+                    exact = sum(math.exp(math.lgamma(x + r) - math.lgamma(r) - math.lgamma(x + 1)
+                                         + r * math.log(r / (r + mean))
+                                         + x * math.log(mean / (r + mean)))
+                                for x in range(k, k + 20000))
+                    self.assertLess(abs(ct.nbinom_sf(k, mean, d) - exact),
+                                    1e-8 * exact + 1e-280, msg=(k, mean, d))
+        self.assertEqual(ct.nbinom_sf(0, 1.0, 1.0), 1.0)
+        self.assertEqual(ct.nbinom_sf(3, 2.0, 0.0), ct.poisson_sf(3, 2.0))
+
+    def test_background_window_gap_and_trim(self):
+        sig = {("c", "+"): {1000: 50.0, 1001: 9.0, 1003: 4.0, 1050: 100.0, 1060: 2.0,
+                            900: 3.0, 899: 7.0}}
+        bg = ct.LocalBackground(sig, window=100, gap=2, trim=1)
+        # Window 900..1100 without 998..1002: 1003 (4), 1050 (100), 1060 (2), 900 (3);
+        # 899 is outside; the busiest (100) is trimmed.
+        self.assertAlmostEqual(bg.rate("c", "+", 1000), (4 + 2 + 3 + 1.0) / (2 * 98 - 1))
+        self.assertAlmostEqual(bg.rate("c", "-", 1000), 1.0 / (2 * 98 - 1))
+
+    def test_call_local(self):
+        import random
+        rng = random.Random(6)
+        reps = []
+        for _ in range(2):
+            sig = {("c", "+"): {}, ("c", "-"): {}}
+            for pos in range(1, 50001):            # negative-binomial background
+                rate, k = 0.1 * rng.gammavariate(0.5, 2.0), 0
+                t = rng.expovariate(1.0)
+                while t < rate:
+                    k += 1
+                    t += rng.expovariate(1.0)
+                if k:
+                    sig[("c", "+")][pos] = float(k)
+            sig[("c", "+")][20000] = 40.0          # a TSS
+            sig[("c", "-")][30000] = 15.0          # a TSS in an empty region
+            reps.append(sig)
+        reps[1][("c", "-")][40000] = 30.0          # one replicate only: not called
+        calls = ct.call_local(reps, dispersion=2.0)
+        self.assertEqual({(t.strand, t.pos) for t in calls}, {("+", 20000), ("-", 30000)})
+        self.assertGreater(calls[0].background, 0)
+        # With a control in which the site is far more abundant it is dropped.
+        ctl = {("c", "+"): {20000: 5000.0, 5: 10.0}, ("c", "-"): {5: 10.0}}
+        kept = ct.call_local(reps, [ctl, ctl], dispersion=2.0)
+        self.assertEqual({(t.strand, t.pos) for t in kept}, {("-", 30000)})
+
+    def test_call_local_cli(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            beds = []
+            for rep in range(2):
+                text = bed_reads("chr", 500, "+", 20) + bed_reads("chr", 900, "-", 12)
+                text += "".join(bed_reads("chr", p, "+", 1) for p in range(100, 1000, 37))
+                beds.append(write(tmp, "rep%d.bed" % rep, text))
+            prefix = os.path.join(tmp, "out", "TSS")
+            self.assertEqual(ct.main(["call", "--method", "local", "--enriched"] + beds
+                                     + ["--out-prefix", prefix]), 0)
+            with open(prefix + ".tsv") as handle:
+                rows = handle.read().splitlines()[1:]
+            self.assertEqual(sorted((r.split("\t")[2], r.split("\t")[1]) for r in rows),
+                             [("+", "500"), ("-", "900")])
+
 if __name__ == "__main__":
     unittest.main()

@@ -9,7 +9,8 @@ Tools to judge TSS-calling methods on real and simulated Cappable-seq data
 | `harness.py` | Runs every method on every dataset and writes one table of measures |
 | `simulate.py` | Synthetic 5'-end libraries with planted TSS, optionally calibrated from a real library |
 | `calibration.py` | Null tests for the statistical calls (false calls where there is nothing to find) |
-| `matched.py` | Compares rankings (RPM, fold, p-value) at the same number of TSS on independent evidence |
+| `matched.py` | Compares rankings (RPM, local test, control test) at the same number of TSS on independent evidence |
+| `sensitivity.py` | Settings of the local-background test against call numbers and promoter rates |
 | `ettwiller2016/` | Rebuilds the *E. coli* data and compares with the published TSS table |
 | `frontiers2026/` | TSSpredator and ANNOgesic on wAlbB fragment-library data |
 | `tools/` | Download SRA runs, list runs per project, annotate genomes, TSS statistics |
@@ -113,7 +114,7 @@ dispersion 0.05):
 | Table S1 recall, exact | 96% | 64% | 39% |
 | TSS called at 25% of reads | 19,185 | 4,170 | 2,506 |
 
-**Matched comparison** (`matched.py`): every position with ≥ 3 reads ranked by
+**Matched comparison** (first version of `matched.py`, `results/matched_ecoli.tsv`): every position with ≥ 3 reads ranked by
 each score and the top N compared (−10 box rate):
 
 | Top N | RPM (Ettwiller filter) | fold enrichment | p-value, dispersion 0 | 0.02 | 0.05 |
@@ -157,3 +158,109 @@ filter (not depleted, as in the Ettwiller pipeline), not the test that
 decides. The evidence for a TSS is a 5'-end pile-up above the local
 background, which is approach D, needed anyway for datasets without a
 control. `call` keeps `--method cutoff` as the default.
+
+## Test against the local background (approach D, October 2026)
+
+`call --method local`: replicates pooled; a position with ≥ 3 pooled reads and
+reads in every replicate is tested against the 5'-end rate of its
+neighbourhood (±100 nt, leaving out ±2 nt and the 5 busiest positions, one
+pseudo-read) with a negative binomial; BH FDR 5% over every position of the
+genome; with a control, sites depleted after enrichment are removed (the
+Ettwiller rule). Results: `results/matched_local_*`, `results/local_real_*`,
+`results/sim_walbb_local_bias*.tsv`.
+
+**What the background looks like.** Read 5' ends are spread very unevenly:
+where the background is 2–8 reads per position, 44% of positions (E. coli,
+after trimming) have no reads, against 2% for Poisson; the excess at a
+position correlates 0.94 between wAlbB replicates, so the unevenness is
+fixed (ligation preferences, processed ends), not noise. A Poisson test
+would be far too lenient, and no single negative binomial fits (maximum
+likelihood gives dispersions of 40–1000, which leave the test powerless).
+The dispersion is therefore a fixed setting (2); the ranking hardly changes
+between 0.5 and 10. Replicates are pooled rather than combined with
+Fisher's method because the unevenness repeats in each replicate. Testing
+only positions with ≥ 3 reads with unconditional p-values requires counting
+all positions in the FDR; counting only the tested ones called almost every
+tested position in a null test.
+
+**Matched comparison** (`matched.py`, same candidates for each ranking; −10
+box rate of the top N):
+
+| Top N | E. coli RPM / local | wAlbB RPM / local | Salmonella RPM / local | wMelPop-CLA RPM / local |
+|---|---|---|---|---|
+| 1,000 | 35.9% / 35.0% | 55.0% / 55.9% | 38.7% / 38.6% | 60.4% / 59.7% |
+| 4,000 | 31.1% / **35.8%** | 48.7% / 50.0% | 36.2% / 36.8% | 52.0% / 52.7% |
+| 8,000 | 27.0% / **34.1%** | 45.0% / 47.5% | 34.2% / 35.0% | – |
+| 16,000 | 23.5% / **30.5%** | 39.4% / 41.8% | 31.5% / 32.2% | – |
+
+Ranking by the local test is better than ranking by read count in E. coli
+(+1 purine also 86% against 79%), slightly better in wAlbB and *Salmonella*
+and equal in wMelPop-CLA (where few candidates remain after requiring reads
+in all three replicates). It also picks fewer sites at rRNA and tRNA genes
+(0.1–1% against 0.3–2%). Count divided by background ranks worse than the
+p-value.
+
+**Where the FDR stops.** In wAlbB the local test stops at about 17,000 sites,
+where the −10 box rate of further ranks falls from 26–30% to 17% and 11%
+(background 8%); with replicates the stop is sensible. With one library
+(E. coli) it stops at 52,000 and the box rate declines smoothly, because
+isolated read stacks (e.g. PCR duplicates) cannot be removed by requiring
+reads in several replicates; `call` warns in that case.
+
+**Real data, called sets** (`harness.py real`):
+
+| | E. coli E / local | Salmonella E / local | wAlbB E / local | wMelPop-CLA E / local |
+|---|---|---|---|---|
+| TSS | 16,639 / 51,064 | 10,609 / 37,071 | 4,724 / 16,707 | 2,119 / 3,924 |
+| −10 box (background) | 25% / 18% (2.5%) | 33% / 26% (2.5%) | 49% / 41% (8%) | 57% / 53% (7%) |
+| Held-out replicate support | – | 88% / 79% | 94% / 71% | 89% / 64% |
+| TSS at 25% of reads | 19,185 / 18,397 | 10,025 / 18,755 | 4,384 / 9,295 | 1,833 / 1,809 |
+| Orthogonal coverage rise (background) | – | – | 56% / 36% (9% / 12%) | – |
+
+The local test calls 2–3.5 times more TSS. The additional sites are weak:
+lower promoter rates (but 3–10 times background), less often found by the
+held-out replicate alone and by a coverage rise in the fragment library,
+and lost when reads are removed. Unlike the RPM cut-off, it calls fewer TSS
+with fewer reads.
+
+**Simulation** calibrated from wAlbB (dispersion 0.015, three replicates),
+with a fixed per-position background bias of variance 2 as in real data
+(`--position-bias 2`), precision / recall:
+
+| | Depth | `ettwiller2016` | `suliman2025` | local |
+|---|---|---|---|---|
+| No control | 1 | 0.67 / 0.95 | 1.00 / 0.73 | 0.72 / 0.98 |
+| | 0.25 | 0.47 / 0.94 | 1.00 / 0.67 | **0.87** / 0.93 |
+| | 0.05 | 0.95 / 0.72 | 1.00 / 0.56 | 0.98 / 0.71 |
+| With control | 1 | 0.88 / 0.95 | 1.00 / 0.73 | 0.93 / 0.98 |
+| | 0.25 | 0.92 / 0.89 | 1.00 / 0.67 | 0.96 / 0.92 |
+| | 0.05 | 0.99 / 0.64 | 1.00 / 0.56 | 1.00 / 0.69 |
+
+Without a control the false calls of both are processed ends (planted at
+5% of their control strength in the enriched library), which no method
+without a control can tell from TSS.
+
+**Parameter sensitivity** (`sensitivity.py`; TSS called, and −10 box rate of
+the top 8,000 for wAlbB and E. coli, top 2,000 for wMelPop-CLA):
+
+| Setting | wAlbB | wMelPop-CLA | E. coli |
+|---|---|---|---|
+| defaults | 16,710 (47.5%) | 3,924 (57.0%) | 51,064 (34.1%) |
+| window ±50 / ±200 | 17,278 / 16,044 (47.4% / 47.2%) | 3,925 / 3,921 | 54,665 / 48,642 (34.1% / 33.9%) |
+| trim 0 / 10 | 12,024 / 17,646 (46.6% / 47.5%) | 3,411 / 3,966 | 33,841 / 56,199 (34.1% / 33.9%) |
+| minimum reads 2 / 5 | 16,710 / 15,583 | 3,924 / 3,455 | 51,385 / 41,002 |
+| FDR 1% / 10% | 15,948 / 17,038 | 3,890 / 3,937 | 46,191 / 53,458 |
+
+The ranking does not depend on the settings. The number of calls depends
+mostly on trimming, and hardly on the FDR level: almost every position with
+reads in all replicates and a quiet neighbourhood passes, so in practice the
+call set is "≥ 3 pooled reads, in every replicate, standing out from the
+trimmed background" and the q-value adds little to the stop.
+
+**Conclusion.** The local test ranks TSS at least as well as read count in
+every dataset (much better in E. coli), works without a control, and with
+replicates stops near where calls stop looking like promoters. It calls
+many more weak TSS than the RPM cut-off; whether those are wanted is a
+choice of depth against confidence. The q-values are nominal (the
+dispersion is a setting, not an estimate). `--method cutoff` stays the
+default until the choice of stop is settled (plan section 7).

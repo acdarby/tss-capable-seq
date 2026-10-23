@@ -1,0 +1,4 @@
+dataset	method	n_tss	share_Primary	share_Secondary	share_Internal	share_Antisense	share_Orphan	box10_all	box35_all	box10_Primary	box10_Internal	box10_Antisense	box10_background	ref_precision_0	ref_recall_0	ref_precision_5	ref_recall_5	down0.5_n	down0.5_recovery	down0.25_n	down0.25_recovery
+ecoli	ettwiller2016	16639	0.159	0.233	0.450	0.279	0.032	0.247	0.078	0.364	0.190	0.316	0.027	0.943	0.959	0.951	0.968	17344	0.926	19185	0.893
+ecoli	suliman2025	4079	0.425	0.195	0.308	0.202	0.035	0.322	0.115	0.387	0.253	0.366	0.024	0.927	0.231	0.932	0.232	4065	0.970	4109	0.955
+ecoli	local	51064	0.073	0.157	0.463	0.404	0.029	0.181	0.061	0.309	0.138	0.210	0.025	0.273	0.852	0.275	0.859	30104	0.565	18397	0.348

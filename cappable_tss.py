@@ -465,14 +465,21 @@ def fisher_combine(pvalues):
     return chi2_sf_even(-2.0 * sum(math.log(p) for p in pvalues), 2 * len(pvalues))
 
 
-def bh_qvalues(pvalues):
-    """Benjamini-Hochberg adjusted p-values (q-values), in input order."""
+def bh_qvalues(pvalues, n_tests=None):
+    """Benjamini-Hochberg adjusted p-values (q-values), in input order.
+
+    `n_tests` is the number of hypotheses if larger than len(pvalues): when
+    only some positions are tested (say, those with at least 3 reads) but the
+    p-values do not condition on that selection, the untested positions still
+    count as tests (their p-values are all larger than the tested ones).
+    """
     n = len(pvalues)
+    total = max(n, n_tests or 0)
     order = sorted(range(n), key=lambda i: pvalues[i], reverse=True)
     q = [0.0] * n
     running = 1.0
     for rank, i in enumerate(order):
-        running = min(running, pvalues[i] * n / (n - rank))
+        running = min(running, pvalues[i] * total / (n - rank))
         q[i] = running
     return q
 
@@ -544,6 +551,156 @@ def call_binomial(enriched, controls, fdr=0.05, min_fold=1.0, min_reads=3,
                       sum(finite) / len(finite) if finite else float("inf"), passed)
             tss.pvalue, tss.qvalue = p, q
             calls.append(tss)
+    calls.sort(key=lambda t: t.key)
+    return calls
+
+
+def poisson_sf(k, mean):
+    """P(X >= k) for X ~ Poisson(mean)."""
+    if k <= 0:
+        return 1.0
+    if mean <= 0.0:
+        return 0.0
+    log_pmf = lambda x: x * math.log(mean) - mean - math.lgamma(x + 1)  # noqa: E731
+    if k > mean:                       # upper tail, terms decrease from k
+        term = math.exp(log_pmf(k))
+        total, x = term, k
+        while term > total * 1e-16:
+            x += 1
+            term *= mean / x
+            total += term
+        return min(1.0, total)
+    term = math.exp(log_pmf(k - 1))    # 1 - lower tail, terms decrease from k - 1
+    lower, x = term, k - 1
+    while x > 0 and term > lower * 1e-16:
+        term *= x / mean
+        x -= 1
+        lower += term
+    return max(0.0, 1.0 - lower)
+
+
+def nbinom_sf(k, mean, dispersion):
+    """P(X >= k) for a negative binomial with this mean and variance
+    mean + dispersion * mean^2 (dispersion 0 gives the Poisson)."""
+    if dispersion <= 0:
+        return poisson_sf(k, mean)
+    if k <= 0:
+        return 1.0
+    if mean <= 0.0:
+        return 0.0
+    size = 1.0 / dispersion
+    return betainc(k, size, mean / (size + mean))
+
+
+class LocalBackground(object):
+    """Reads per position around a site, from its neighbourhood on the same strand.
+
+    The window is `window` nt either side, leaving out `gap` nt either side of
+    the site (where its own reads spread). The `trim` busiest positions of the
+    window are also left out, so a neighbouring TSS does not count as
+    background. One pseudo-read keeps the rate above zero in empty windows.
+    """
+
+    def __init__(self, signal, window=100, gap=2, trim=5):
+        self.window, self.gap, self.trim = window, gap, trim
+        self.width = 2 * (window - gap) - trim
+        self.index = {}
+        for key, positions in signal.items():
+            pos = sorted(positions)
+            self.index[key] = (pos, [positions[p] for p in pos])
+
+    def rate(self, seqid, strand, pos):
+        positions, counts = self.index.get((seqid, strand), ((), ()))
+        lo = bisect.bisect_left(positions, pos - self.window)
+        hi = bisect.bisect_right(positions, pos + self.window)
+        values = [counts[j] for j in range(lo, hi) if abs(positions[j] - pos) > self.gap]
+        total = sum(values)
+        if self.trim and values:
+            total -= sum(sorted(values)[-self.trim:])
+        return (total + 1.0) / self.width
+
+
+# Dispersion of 5'-end counts around the local background. Read 5' ends are
+# spread very unevenly, also between neighbouring positions and in the same
+# way in every replicate, and no single negative binomial fits both the many
+# empty positions and the heavy tail (maximum-likelihood estimates on public
+# data run to 40-1000). On the benchmarks the ranking of TSS hardly changes
+# between 0.5 and 10, and with replicates 2 stops where calls stop looking
+# like promoters (benchmarks/README.md); q-values are nominal.
+DEFAULT_LOCAL_DISPERSION = 2.0
+
+
+def pool_signals(signals):
+    """Sum of several signals."""
+    pooled = new_signal()
+    for signal in signals:
+        for key, positions in signal.items():
+            target = pooled[key]
+            for pos, value in positions.items():
+                target[pos] = target.get(pos, 0.0) + value
+    return pooled
+
+
+def call_local(enriched, controls=None, fdr=0.05, min_reads=3, min_replicates=None,
+               window=100, gap=2, trim=5, dispersion=DEFAULT_LOCAL_DISPERSION,
+               exclude=None):
+    """Call TSS as 5'-end pile-ups above the local background (no control needed).
+
+    Replicates are pooled and tested once: the uneven spread of read 5' ends
+    is reproducible between replicates, so per-replicate tests would not be
+    independent. A position is tested if the pooled count is at least
+    `min_reads` and it has reads in at least `min_replicates` replicates
+    (default all). Under the null the count is negative binomial with the
+    local background rate (LocalBackground) as mean and `dispersion`
+    (see DEFAULT_LOCAL_DISPERSION). Positions with a
+    Benjamini-Hochberg q-value <= `fdr` are called; every position of the
+    genome (two strands) counts as a test. With controls, a call must
+    also not be depleted in the enriched library (RPM at least that of the
+    control, a missing control counting as one read, as in Ettwiller et al.
+    2016), which removes processed ends.
+    """
+    reps = len(enriched)
+    min_replicates = reps if min_replicates is None else min_replicates
+    pooled = pool_signals(enriched)
+    background = LocalBackground(pooled, window, gap, trim)
+    e_size = [library_size(lib, exclude) or 1.0 for lib in enriched]
+    ctl = pool_signals(controls) if controls else None
+    c_size = (library_size(ctl, exclude) or 1.0) if ctl is not None else None
+    pooled_size = sum(e_size)
+
+    tested = []
+    for (seqid, strand), positions in pooled.items():
+        for pos, x in positions.items():
+            if x < min_reads:
+                continue
+            present = sum(1 for lib in enriched if lib.get((seqid, strand), {}).get(pos, 0.0) > 0)
+            if present < min_replicates:
+                continue
+            rate = background.rate(seqid, strand, pos)
+            tested.append((seqid, strand, pos, x, present, rate,
+                           nbinom_sf(int(round(x)), rate, dispersion)))
+    # Every position of the genome is a hypothesis: the p-values do not
+    # condition on the read count that selected the tested positions.
+    n_tests = 0
+    for seqid in {key[0] for key in pooled}:
+        n_tests += len(STRANDS) * max(max(pooled.get((seqid, s), {0: 0})) for s in STRANDS)
+    qvals = bh_qvalues([t[6] for t in tested], n_tests)
+    calls = []
+    for (seqid, strand, pos, x, present, rate, p), q in zip(tested, qvals):
+        if q > fdr:
+            continue
+        e_rpm = x / pooled_size * 1e6
+        c_rpm = log2fc = float("nan")
+        if ctl is not None:
+            c = ctl.get((seqid, strand), {}).get(pos, 0.0)
+            c_rpm = c / c_size * 1e6
+            if e_rpm < max(c, 1.0) / c_size * 1e6:
+                continue                 # depleted after enrichment: processed end
+            log2fc = math.log2(e_rpm / c_rpm) if c else float("inf")
+        tss = TSS(seqid, pos, strand, e_rpm, c_rpm, log2fc, present)
+        tss.pvalue, tss.qvalue = p, q
+        tss.background = rate
+        calls.append(tss)
     calls.sort(key=lambda t: t.key)
     return calls
 
@@ -1103,26 +1260,40 @@ def build_parser():
     call.add_argument("--feature-types", default="gene",
                       help="Comma-separated GFF feature types used as genes "
                            "(default: gene; CDS is a common alternative)")
-    call.add_argument("--method", choices=("cutoff", "binomial"), default="cutoff",
+    call.add_argument("--method", choices=("cutoff", "binomial", "local"), default="cutoff",
                       help="cutoff: fixed RPM and enrichment cut-offs (the presets); "
                            "binomial: test enriched against control counts at each "
-                           "position with a false-discovery rate (needs --control). "
+                           "position with a false-discovery rate (needs --control); "
+                           "local: test 5'-end pile-ups against the local background "
+                           "(no control needed; a control removes depleted sites). "
                            "Default: cutoff")
     call.add_argument("--fdr", type=float, default=0.05,
-                      help="binomial: false-discovery rate (default 0.05)")
+                      help="binomial, local: false-discovery rate (default 0.05)")
     call.add_argument("--min-fold", type=float, default=1.0,
                       help="binomial: enrichment over the control that the test must "
                            "exceed (default 1, i.e. any enrichment)")
     call.add_argument("--min-reads", type=int, default=3,
                       help="binomial: test only positions with at least this many reads "
-                           "in one enriched library (default 3)")
+                           "in one enriched library; local: in the pooled replicates "
+                           "(default 3)")
+    call.add_argument("--window", type=int, default=100,
+                      help="local: background window either side of a site (default 100)")
+    call.add_argument("--gap", type=int, default=2,
+                      help="local: nt either side of a site left out of its background "
+                           "(default 2)")
+    call.add_argument("--trim", type=int, default=5,
+                      help="local: busiest window positions left out of the background, "
+                           "so a neighbouring TSS does not count (default 5)")
+    call.add_argument("--local-dispersion", type=float, default=DEFAULT_LOCAL_DISPERSION,
+                      help="local: negative-binomial dispersion of counts around the "
+                           "background (default %g)" % DEFAULT_LOCAL_DISPERSION)
     call.add_argument("--dispersion", default="auto",
                       help="binomial: variation between libraries beyond sampling noise "
                            "(beta-binomial test); 'auto' estimates it from enriched "
                            "replicates, or uses %g with one replicate; 0 gives the plain "
                            "binomial test (default auto)" % DEFAULT_DISPERSION)
     call.add_argument("--normalise", choices=("total", "exclude-rna"), default="exclude-rna",
-                      help="binomial: library sizes from all reads, or leaving out reads "
+                      help="binomial, local: library sizes from all reads, or leaving out reads "
                            "in rRNA and tRNA genes of --annotation (default exclude-rna; "
                            "falls back to total without an annotation)")
     call.add_argument("--preset", choices=sorted(PRESETS), default="default",
@@ -1253,16 +1424,25 @@ def main(argv=None):
                          % (flagged, "y" if flagged == 1 else "ies"))
         return 2
     min_replicates = args.min_replicates
-    if args.method == "binomial":
+    exclude = None
+    if args.method in ("binomial", "local") and args.normalise == "exclude-rna":
+        if args.annotation:
+            exclude = GeneIndex(read_genes(args.annotation, ("rRNA", "tRNA")))
+        else:
+            sys.stderr.write("No --annotation: library sizes include rRNA/tRNA reads\n")
+    if args.method == "local":
+        if len(enriched) < 2:
+            sys.stderr.write("Warning: --method local with one library cannot require reads "
+                             "in several replicates; isolated read stacks (e.g. PCR "
+                             "duplicates) are then called and the FDR is too optimistic\n")
+        calls = call_local(enriched, controls or None, fdr=args.fdr, min_reads=args.min_reads,
+                           min_replicates=min_replicates or len(enriched),
+                           window=args.window, gap=args.gap, trim=args.trim,
+                           dispersion=args.local_dispersion, exclude=exclude)
+    elif args.method == "binomial":
         if len(controls) != len(enriched):
             sys.stderr.write("--method binomial needs one --control per --enriched library\n")
             return 1
-        exclude = None
-        if args.normalise == "exclude-rna":
-            if args.annotation:
-                exclude = GeneIndex(read_genes(args.annotation, ("rRNA", "tRNA")))
-            else:
-                sys.stderr.write("No --annotation: library sizes include rRNA/tRNA reads\n")
         if args.dispersion == "auto":
             dispersion = estimate_dispersion(enriched)
             source = "estimated from replicates"

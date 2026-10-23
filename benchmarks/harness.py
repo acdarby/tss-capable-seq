@@ -86,6 +86,12 @@ def method_betabinom_fold2(enriched, controls, ctx=None):
     return _binomial(enriched, controls, ctx, 2.0, "auto")
 
 
+def method_local(enriched, controls, ctx=None):
+    """5'-end pile-ups above the local background (no control needed), FDR 5%."""
+    calls = ct.call_local(enriched, controls or None, exclude=(ctx or {}).get("exclude"))
+    return ct.cluster_tss(calls, 6)
+
+
 METHODS = {
     "ettwiller2016": method_ettwiller2016,
     "suliman2025": method_suliman2025,
@@ -93,6 +99,7 @@ METHODS = {
     "binomial_fold2": method_binomial_fold2,
     "betabinom": method_betabinom,
     "betabinom_fold2": method_betabinom_fold2,
+    "local": method_local,
 }
 
 
@@ -394,6 +401,9 @@ def main(argv=None):
     sim.add_argument("--data-dir")
     sim.add_argument("--manifest", default=os.path.join(HERE, "datasets.toml"))
     sim.add_argument("--replicates", type=int, default=3)
+    sim.add_argument("--position-bias", type=float, default=0.0,
+                     help="Variance of a fixed per-position background multiplier "
+                          "shared by all libraries (default 0; real data about 2)")
     sim.add_argument("--dispersion", type=float, default=0.1,
                      help="Variance of the per-library rate multipliers (default 0.1; "
                           "replicates of the public data give 0.01-0.05)")
@@ -423,8 +433,11 @@ def main(argv=None):
             print("profile %s: %s" % (args.profile, params), file=sys.stderr)
         if args.dispersion != 0.1:
             label += "_disp%g" % args.dispersion
+        if args.position_bias:
+            label += "_bias%g" % args.position_bias
         rows = evaluate_sim(methods, depths, seed=args.seed, label=label,
-                            replicates=args.replicates, dispersion=args.dispersion, **params)
+                            replicates=args.replicates, dispersion=args.dispersion,
+                            position_bias=args.position_bias, **params)
     else:
         with open(args.manifest, "rb") as handle:
             datasets = tomllib.load(handle)["dataset"]

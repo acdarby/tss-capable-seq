@@ -134,6 +134,34 @@ count and misses many weak TSS, because the control also contains TSS 5'
 ends. It is therefore not the default; use it when a calibrated error rate
 matters more than sensitivity.
 
+#### Test against the local background (`--method local`)
+
+Works without a control. Replicates are pooled, and a position with at
+least `--min-reads` (3) pooled reads and reads in at least
+`--min-replicates` replicates (default all) is tested against the 5'-end
+rate of its neighbourhood: `--window` (100) nt either side, leaving out
+`--gap` (2) nt either side and the `--trim` (5) busiest positions, so a
+neighbouring TSS does not count as background. Counts around the background
+are very uneven, so the test uses a negative binomial with
+`--local-dispersion` (2). Positions with a BH q-value ≤ `--fdr` are called,
+counting every position of the genome as a test. With `--control`, sites
+less abundant after enrichment than in the control (processed ends) are
+removed, as in the Ettwiller pipeline.
+
+```bash
+python cappable_tss.py call --method local \
+    --enriched rep1.bam rep2.bam rep3.bam \
+    --annotation genome.gff --feature-types CDS \
+    --out-prefix results/TSS
+```
+
+On the benchmarks this ranks TSS at least as well as read count (much
+better in *E. coli*) and finds 2–3.5 times more TSS than the Ettwiller
+cut-offs, mostly weak ones. Use it with replicates: with a single library,
+isolated read stacks such as PCR duplicates are called and the q-values are
+too optimistic. The q-values are nominal, because the dispersion is a
+setting rather than an estimate. Details in `benchmarks/README.md`.
+
 Input notes:
 
 * **BAM**: unmapped, secondary, supplementary and QC-fail reads are

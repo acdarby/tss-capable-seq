@@ -12,6 +12,10 @@ The model is deliberately simple and every part of it is a parameter:
   in the non-enriched control, weak after enrichment;
 * rRNA-like pile-up (control only): a block that takes a large share of control
   reads, as in the E. coli control (76% rRNA);
+* position bias: the background rate of each position is multiplied by a
+  gamma variable with mean 1 and variance `position_bias`, the same in every
+  library (read 5' ends are spread very unevenly and reproducibly in real
+  data, e.g. through ligation preferences; public libraries give about 2);
 * replicates: each site's rate is multiplied per replicate by a gamma variable
   with mean 1 and variance `dispersion` (biological variability), then counts
   are Poisson.
@@ -80,7 +84,7 @@ def simulate(length=1_000_000, n_tss=1000, replicates=3, depth=1.0,
              segment_length=1000, spread=(0.6, 0.15, 0.05), dispersion=0.1,
              with_control=False, control_tss_factor=0.1, n_processed=300,
              processed_strength=200.0, control_background=1.0,
-             rrna_fraction=0.0, seed=0):
+             rrna_fraction=0.0, position_bias=0.0, seed=0):
     """Simulate enriched (and optionally control) libraries.
 
     Expected counts are per library at `depth` 1.0; `depth` scales everything.
@@ -123,6 +127,9 @@ def simulate(length=1_000_000, n_tss=1000, replicates=3, depth=1.0,
 
     bg_rate = {s: _segments(rng, length, segment_length, background, background_sigma)
                for s in strands}
+    if position_bias > 0:
+        for s in strands:
+            bg_rate[s] = bg_rate[s] * rng.gamma(1 / position_bias, position_bias, size=length)
 
     def library(tss_factor, bg_factor, processed_rate, rrna):
         rate = {s: bg_rate[s] * bg_factor * depth for s in strands}

@@ -1,0 +1,4 @@
+dataset	method	n_tss	share_Primary	share_Secondary	share_Internal	share_Antisense	share_Orphan	box10_all	box35_all	box10_Primary	box10_Internal	box10_Antisense	box10_background	ortho_rise	ortho_rise_background	loo_support	down0.5_n	down0.5_recovery	down0.25_n	down0.25_recovery
+walbb	ettwiller2016	4724	0.180	0.131	0.475	0.337	0.046	0.488	0.161	0.558	0.450	0.502	0.084	0.562	0.091	0.943	4562	0.931	4384	0.883
+walbb	suliman2025	1527	0.378	0.086	0.379	0.286	0.054	0.541	0.241	0.584	0.499	0.553	0.071	0.730	0.064	0.968	1494	0.967	1470	0.947
+walbb	local	16707	0.067	0.136	0.496	0.397	0.041	0.410	0.117	0.517	0.372	0.437	0.079	0.357	0.122	0.710	12710	0.744	9295	0.542

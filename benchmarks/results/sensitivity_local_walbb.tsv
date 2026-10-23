@@ -1,0 +1,10 @@
+dataset	method	n_tss	box10_called	box10_top8000
+walbb	defaults	16710	0.409	0.475
+walbb	window=50	17278	0.405	0.474
+walbb	window=200	16044	0.413	0.472
+walbb	trim=0	12024	0.438	0.466
+walbb	trim=10	17646	0.401	0.475
+walbb	min_reads=2	16710	0.409	0.475
+walbb	min_reads=5	15583	0.417	0.475
+walbb	fdr=0.01	15948	0.416	0.475
+walbb	fdr=0.1	17038	0.407	0.475

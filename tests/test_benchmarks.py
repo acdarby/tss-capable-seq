@@ -40,6 +40,19 @@ class SimulateTests(unittest.TestCase):
         for seqid, strand, pos in sim["processed"]:
             self.assertGreater(ctl[(seqid, strand)].get(pos, 0), 100)
 
+    def test_position_bias_is_shared_by_replicates(self):
+        sim = simulate.simulate(length=20_000, n_tss=0, replicates=2, background=2.0,
+                                background_sigma=0.0, dispersion=0.0, position_bias=2.0,
+                                n_processed=0, seed=4)
+        a, b = (np.array([s[("sim", "+")].get(p, 0) for p in range(1, 20_001)])
+                for s in sim["enriched"])
+        self.assertGreater(np.corrcoef(a, b)[0, 1], 0.5)
+        flat = simulate.simulate(length=20_000, n_tss=0, replicates=2, background=2.0,
+                                 background_sigma=0.0, dispersion=0.0, n_processed=0, seed=4)
+        a, b = (np.array([s[("sim", "+")].get(p, 0) for p in range(1, 20_001)])
+                for s in flat["enriched"])
+        self.assertLess(abs(np.corrcoef(a, b)[0, 1]), 0.05)
+
     def test_profile_from_signal(self):
         sig = {("c", "+"): {100: 50.0, 101: 10.0, 500: 1.0}, ("c", "-"): {300: 20.0}}
         prof = simulate.profile_from_signal(sig, [("c", "+", 100), ("c", "-", 300)], 1000)
