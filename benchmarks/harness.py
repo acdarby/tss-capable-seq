@@ -187,6 +187,93 @@ def box_rates(sites, seq):
     return m10, m35
 
 
+# Promoter score (fixed, from the literature; not learned from our calls).
+# sigma70 -10 element T(-12)A(-11)T(-10)A(-9)A(-8)T(-7); A-11 and T-7 are the
+# bases sigma reads (Feklistov & Darst 2011, doi:10.1016/j.cell.2011.10.041).
+# -35 TTGACA counts only 16-18 nt upstream of the -10 (spacer 17 +- 1); some
+# promoters have a TG extended -10 instead (Shultzaberger et al. 2007,
+# doi:10.1093/nar/gkl956; Mitchell et al. 2003, doi:10.1093/nar/gkg694).
+TEN_STARTS = range(-14, -9)      # -10 hexamer may start at -14..-10
+SPACERS = (16, 17, 18)
+
+
+def _mismatches(a, b):
+    return sum(x != y for x, y in zip(a, b))
+
+
+def promoter_elements(seq, strand, pos):
+    """sigma70 promoter elements upstream of a 1-based TSS (None near the ends).
+
+    Returns dict(core10, box10, ext10, box35, purine): core10 = T, A and T at
+    hexamer positions 1, 2 and 6 (the -12, -11 and -7 bases); box10 = TATAAT
+    with <= 1 mismatch; both with the hexamer starting at -14..-10. ext10 = a
+    -10 (core10 or box10) with TG at its positions -3 and -2; box35 = a -10 with
+    TTGACA (<= 2 mismatches) 16-18 nt upstream; purine = A or G at +1.
+    """
+    if not 80 < pos < len(seq) - 80:
+        return None
+    w = upstream(seq, strand, pos, 60, 0)          # w[i] = position -60 + i; w[60] = +1
+    if len(w) != 61:
+        return None
+    core = box = ext = b35 = False
+    for start in TEN_STARTS:
+        i = start + 60
+        hexamer = w[i:i + 6]
+        is_core = hexamer[0] == "T" and hexamer[1] == "A" and hexamer[5] == "T"
+        is_box = _mismatches(hexamer, "TATAAT") <= 1
+        if not (is_core or is_box):
+            continue
+        core, box = core or is_core, box or is_box
+        ext = ext or w[i - 3:i - 1] == "TG"
+        b35 = b35 or any(_mismatches(w[i - sp - 6:i - sp], "TTGACA") <= 2 for sp in SPACERS)
+    return dict(core10=core, box10=box, ext10=ext, box35=b35, purine=w[60] in "AG")
+
+
+class MatchedBackground(object):
+    """Random positions with the same AT content upstream as given sites.
+
+    AT-rich genomes contain more TATAAT-like words by chance, and the regions
+    around TSS are often more AT-rich than genes, so the background for a site
+    is a random position whose -60..-1 window has the same AT share (to 1/60).
+    """
+
+    def __init__(self, seq, n=200000, seed=0):
+        rng = np.random.default_rng(seed)
+        self.seq = seq
+        self.bins = collections.defaultdict(list)
+        for pos, strand in zip(rng.integers(100, len(seq) - 100, n), rng.integers(0, 2, n)):
+            st = "+-"[strand]
+            w = upstream(seq, st, int(pos), 60, 1)
+            self.bins[sum(b in "AT" for b in w)].append((st, int(pos)))
+        self.rng = rng
+
+    def sample(self, sites):
+        out = []
+        for st, p in sites:
+            w = upstream(self.seq, st, p, 60, 1)
+            at = sum(b in "AT" for b in w)
+            for d in (0, 1, -1, 2, -2, 3, -3):
+                pool = self.bins.get(at + d)
+                if pool:
+                    out.append(pool[int(self.rng.integers(len(pool)))])
+                    break
+        return out
+
+
+def promoter_rates(sites, seq, background=None):
+    """Share of sites with each promoter element; with a MatchedBackground, also
+    the same for composition-matched random positions (keys ending in _bg)."""
+    els = [e for e in (promoter_elements(seq, st, p) for st, p in sites) if e]
+    out = {}
+    for k in ("core10", "box10", "ext10", "box35", "purine"):
+        out[k] = sum(e[k] for e in els) / len(els) if els else float("nan")
+    if background is not None:
+        bg = [e for e in (promoter_elements(seq, st, p) for st, p in background.sample(sites)) if e]
+        for k in ("core10", "box10", "box35"):
+            out[k + "_bg"] = sum(e[k] for e in bg) / len(bg) if bg else float("nan")
+    return out
+
+
 def shifted(sites, by=100):
     return [(st, p + by if st == "+" else p - by) for st, p in sites]
 
@@ -268,6 +355,7 @@ def evaluate_real(ds, data_dir, methods, downsample, cache_dir, seed=0):
     enriched = [load_signal(path(p), mate, mapq, cache_dir) for p in ds["enriched"]]
     controls = [load_signal(path(p), mate, mapq, cache_dir) for p in ds.get("control", [])]
     seq = read_fasta(path(ds["genome"]))[chrom]
+    background = MatchedBackground(seq)
     genes = ct.read_genes(path(ds["annotation"]), tuple(ds.get("feature_types", ["CDS"])))
     ctx = {"exclude": ct.GeneIndex(ct.read_genes(path(ds["annotation"]), ("rRNA", "tRNA")))}
     reference = None
@@ -293,6 +381,11 @@ def evaluate_real(ds, data_dir, methods, downsample, cache_dir, seed=0):
         counts = collections.Counter(c for t in chrom_tss for c in t.classes)
         for c in CLASSES:
             out["share_" + c] = counts[c] / len(sites) if sites else float("nan")
+        prom = promoter_rates(sites, seq, background)
+        out.update(("prom_" + k, v) for k, v in prom.items())
+        for c in ("Primary", "Internal", "Antisense"):
+            out["prom_core10_" + c] = promoter_rates(
+                [(t.strand, t.pos) for t in chrom_tss if c in t.classes], seq)["core10"]
         m10, m35 = box_rates(sites, seq)
         out["box10_all"], out["box35_all"] = m10, m35
         for c in ("Primary", "Internal", "Antisense"):

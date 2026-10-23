@@ -2,7 +2,8 @@
 """Parameter sensitivity of the local-background test (plan section 5).
 
 For each setting, reports the TSS called at FDR 5% (clustered, 6 nt), their
--10 box rate, and the -10 box rate of the top N sites ranked by p-value.
+-10 core rate (harness.promoter_elements), and that of the top N sites
+ranked by p-value.
 
 usage: sensitivity.py --data-dir DIR --dataset walbb --out results/sensitivity_walbb
 """
@@ -56,9 +57,9 @@ def main(argv=None):
         top = top_sites(ranked, args.top)
         label = ", ".join("%s=%s" % kv for kv in setting.items()) or "defaults"
         rows.append(dict(dataset=args.dataset, method=label, n_tss=len(called),
-                         box10_called=harness.box_rates(harness.as_sites(called), seq)[0],
-                         **{"box10_top%d" % args.top:
-                            harness.box_rates([(st, p) for _, st, p in top], seq)[0]}))
+                         core10_called=harness.promoter_rates(harness.as_sites(called), seq)["core10"],
+                         **{"core10_top%d" % args.top:
+                            harness.promoter_rates([(st, p) for _, st, p in top], seq)["core10"]}))
         print(rows[-1], file=sys.stderr)
     harness.write_rows(rows, args.out)
     return 0

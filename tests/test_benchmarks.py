@@ -81,6 +81,32 @@ class MeasureTests(unittest.TestCase):
         self.assertTrue(harness.has_box(harness.upstream(seq, "+", 101, 15, 5), "TATAAT"))
         self.assertFalse(harness.has_box(harness.upstream(seq, "+", 301, 15, 5), "TATAAT"))
 
+    def test_promoter_elements(self):
+        # TSS at 201 (+): -35 TTGACA at -35..-30, spacer 17, -10 TATAAT at -12..-7,
+        # TG at -15/-14, A at +1.
+        up = "TTGACA" + "C" * 17 + "TATAAT" + "CCCCCC"   # -35 .. -1
+        seq = "C" * (200 - 35) + up + "A" + "C" * 300
+        e = harness.promoter_elements(seq, "+", 201)
+        self.assertEqual(e, dict(core10=True, box10=True, ext10=False, box35=True, purine=True))
+        seq2 = seq[:200 - 15] + "TG" + seq[200 - 13:]
+        self.assertTrue(harness.promoter_elements(seq2, "+", 201)["ext10"])
+        # Same promoter on the minus strand.
+        rc = seq[::-1].translate(harness.COMP)
+        self.assertEqual(harness.promoter_elements(rc, "-", len(seq) - 200), e)
+        # Core only (T A n n n T), wrong spacer for the -35, pyrimidine at +1.
+        up3 = "TTGACA" + "C" * 14 + "TACCCT" + "C" * 6   # -32 .. -1, core -10 at -12
+        seq3 = "C" * (200 - len(up3)) + up3 + "C" + "C" * 300
+        self.assertEqual(harness.promoter_elements(seq3, "+", 201),
+                         dict(core10=True, box10=False, ext10=False, box35=False, purine=False))
+
+    def test_matched_background_composition(self):
+        rng = np.random.default_rng(1)
+        seq = "".join(rng.choice(list("ACGT"), 200_000, p=[0.35, 0.15, 0.15, 0.35]))
+        bg = harness.MatchedBackground(seq, n=20_000)
+        sites = [("+", p) for p in range(1000, 190_000, 997)]
+        at = lambda s: [sum(b in "AT" for b in harness.upstream(seq, st, p, 60, 1)) for st, p in s]
+        self.assertLessEqual(max(abs(a - b) for a, b in zip(at(sites), at(bg.sample(sites)))), 3)
+
     def test_coverage_rise(self):
         cov = {"+": np.zeros(400, dtype=np.float32), "-": np.zeros(400, dtype=np.float32)}
         cov["+"][200:] = 10          # rise at position 200 on +

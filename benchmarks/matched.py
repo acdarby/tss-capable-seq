@@ -10,14 +10,18 @@ candidates are ranked by each method's score, sites within 6 nt of a
 higher-ranked site on the same strand are skipped, and the top N are scored
 on evidence that no method uses:
 
-* box10 / box35: -10 (TATAAT) and -35 (TTGACA) boxes with <= 1 mismatch,
-  as in harness.py; box10_background is the same 100 nt downstream;
+* core10: sigma70 -10 core (T, A, T at -12, -11, -7, hexamer starting at
+  -14..-10; harness.promoter_elements); core10_bg: composition-matched random
+  positions (harness.MatchedBackground); ext10 and box35_spaced: extended -10
+  and a -35 at 16-18 nt from the -10;
+* box10 / box35: the earlier measure (TATAAT, TTGACA with <= 1 mismatch
+  anywhere in -15..-5 and -40..-28); box10_background is 100 nt downstream;
 * purine_1: share with A or G at +1;
 * in_rna: share within 5 nt of an rRNA or tRNA gene;
 * ref_recall_5: recall of reference TSS within 5 nt (E. coli Table S1, made
   with the Ettwiller pipeline, so it favours the RPM ranking).
 
-The band table gives the -10 box rate of ranks in consecutive bands, which
+The band table gives the core10 rate of ranks in consecutive bands, which
 shows where calls stop looking like promoters, and marks where each method's
 own threshold stops (the Ettwiller cut-off, and q <= 0.05 for the tests).
 
@@ -53,10 +57,12 @@ def top_sites(ranked, n=None, distance=6):
     return kept
 
 
-def score(kept, seq, exclude, reference):
+def score(kept, seq, exclude, reference, background=None):
     sites = [(st, p) for _, st, p in kept]
     m10, m35 = harness.box_rates(sites, seq)
-    row = dict(n_tss=len(sites), box10=m10, box35=m35,
+    prom = harness.promoter_rates(sites, seq, background)
+    row = dict(n_tss=len(sites), core10=prom["core10"], core10_bg=prom.get("core10_bg"),
+               box35_spaced=prom["box35"], ext10=prom["ext10"], box10=m10, box35=m35,
                box10_background=harness.box_rates(harness.shifted(sites), seq)[0],
                purine_1=sum(1 for st, p in sites if harness.upstream(seq, st, p, 0, 0) in "AG")
                / len(sites) if sites else float("nan"),
@@ -102,6 +108,7 @@ def main(argv=None):
     controls = [load(p) for p in ds.get("control", [])]
     exclude = ct.GeneIndex(ct.read_genes(path(ds["annotation"]), ("rRNA", "tRNA")))
     seq = harness.read_fasta(path(ds["genome"]))[chrom]
+    background = harness.MatchedBackground(seq)
     reference = None
     if ds.get("reference"):
         reference = [(st, p) for s, st, p in ct.read_sites(path(ds["reference"]))
@@ -143,9 +150,9 @@ def main(argv=None):
     for n in [int(x) for x in args.sizes.split(",")]:
         for name, ranked in rankings.items():
             row = dict(dataset="%s_top%d" % (args.dataset, n), method=name)
-            row.update(score(top_sites(ranked, n), seq, exclude, reference))
+            row.update(score(top_sites(ranked, n), seq, exclude, reference, background))
             out.append(row)
-            print("  top %-6d %-12s box10 %.3f" % (n, name, row["box10"]), file=sys.stderr)
+            print("  top %-6d %-12s core10 %.3f" % (n, name, row["core10"]), file=sys.stderr)
     harness.write_rows(out, args.out)
 
     # Box rate by rank band, and where each method's own threshold stops.
@@ -158,7 +165,8 @@ def main(argv=None):
             cells = []
             for name in names:
                 band = full[name][start:start + args.band]
-                rate = harness.box_rates([(st, p) for _, st, p in band], seq)[0] if band else None
+                rate = (harness.promoter_rates([(st, p) for _, st, p in band], seq)["core10"]
+                        if band else None)
                 mark = "*" if start < stops.get(name, 0) <= start + args.band else ""
                 cells.append("" if rate is None else "%.3f%s" % (rate, mark))
             handle.write("%d-%d\t%s\n" % (start + 1, start + args.band, "\t".join(cells)))
