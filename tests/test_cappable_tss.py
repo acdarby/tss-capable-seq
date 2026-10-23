@@ -208,6 +208,57 @@ class ExportTests(unittest.TestCase):
         self.assertIn("22 -1", rev_text)
 
 
+class LibraryQcTests(unittest.TestCase):
+    def five_prime_like(self):
+        # Sharp peaks: 100 reads at isolated positions, little background.
+        sig = {("chr", "+"): {}}
+        for p in range(100, 10000, 500):
+            sig[("chr", "+")][p] = 100.0
+            sig[("chr", "+")][p + 1] = 5.0
+        for p in range(50, 10000, 997):
+            sig[("chr", "+")][p] = 1.0
+        return sig
+
+    def fragment_like(self):
+        # Read starts spread evenly along transcripts.
+        return {("chr", "+"): {p: 3.0 for p in range(100, 10000)}}
+
+    def test_peak_share_separates_library_types(self):
+        self.assertGreater(ct.peak_share(self.five_prime_like()), 0.9)
+        self.assertLess(ct.peak_share(self.fragment_like()), 0.05)
+
+    def test_peak_share_ignores_single_reads(self):
+        self.assertEqual(ct.peak_share({("chr", "+"): {100: 1.0, 5000: 1.0}}), 0.0)
+
+    def test_sense_share(self):
+        genes = [ct.Gene("chr", 1000, 2000, "+", "g1"), ct.Gene("chr", 3000, 4000, "-", "g2")]
+        # 9 sense + 1 antisense read on each strand.
+        sig = {("chr", "+"): {1500: 9.0, 3500: 1.0}, ("chr", "-"): {3500: 9.0, 1500: 1.0}}
+        self.assertAlmostEqual(ct.sense_share(sig, genes), 0.9)
+
+    def test_warnings(self):
+        good = {"reads": 1e6, "positions": 1000, "peak_share": 0.8, "sense_share": 0.8}
+        self.assertEqual(ct.qc_warnings(good, "enriched"), [])
+        frag = dict(good, peak_share=0.25)
+        self.assertEqual(len(ct.qc_warnings(frag, "enriched")), 1)
+        self.assertEqual(ct.qc_warnings(dict(good, peak_share=0.4), "control"), [])
+        anti = dict(good, sense_share=0.02)
+        self.assertIn("antisense", ct.qc_warnings(anti, "enriched")[0])
+        self.assertIn("no reads", ct.qc_warnings(dict(good, reads=0), "enriched")[0])
+
+    def test_call_writes_qc_and_strict_stops(self):
+        with tempfile.TemporaryDirectory() as d:
+            frag = write(d, "frag.bed", "".join(
+                "chr\t%d\t%d\tr\t0\t+\n" % (p, p + 50) for p in range(100, 3000) for _ in range(2)))
+            prefix = os.path.join(d, "out")
+            self.assertEqual(ct.main(["call", "--enriched", frag, "--out-prefix", prefix]), 0)
+            with open(prefix + ".qc.tsv") as handle:
+                self.assertIn("fragment", handle.read())
+            self.assertEqual(ct.main(["call", "--enriched", frag, "--out-prefix", prefix,
+                                      "--strict-qc"]), 2)
+            self.assertEqual(ct.main(["qc", "--enriched", frag]), 2)
+
+
 try:
     import pysam
 except ImportError:

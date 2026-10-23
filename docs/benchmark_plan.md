@@ -86,7 +86,7 @@ scored on several independent lines of evidence:
 
 Each one is an option that stays off by default until it passes sections 5 and 6.
 
-- [ ] **A. Library-type check**: share of reads at the 1,000 busiest start
+- [x] **A. Library-type check**: share of reads at the 1,000 busiest start
       positions, strand of reads inside genes, insert size; warn when a
       library does not look like 5'-end data (would have flagged PRJNA1392518).
 - [ ] **B. Normalisation**: size factors from reads outside rRNA and tRNA
@@ -185,7 +185,9 @@ two of the symbiont datasets, and the result is written into the report.
 - [x] Write the dataset manifest and the benchmark harness (sections 1–2);
       baselines in `benchmarks/README.md`.
 - [x] Add simulation of planted TSS (section 2), calibrated from real libraries.
-- [ ] Implement A (library-type check) — small, independent, protects users.
+- [x] Implement A (library-type check): `qc` subcommand and checks in `call`;
+      flags all fragment libraries (22–27% peak share) and passes all 5'-end
+      libraries (77–97%; 42% for the E. coli control).
 - [ ] Implement B + C + E (control-based statistics); run the section 5
       tests, then benchmark on *E. coli*.
 - [ ] Implement D + E (local background); run the section 5 tests, then

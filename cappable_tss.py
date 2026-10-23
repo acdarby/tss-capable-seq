@@ -709,6 +709,125 @@ def format_comparison(summary):
 
 
 # ---------------------------------------------------------------------------
+# Library quality checks
+# ---------------------------------------------------------------------------
+
+# Minimum share of reads at sharp peaks for a library to look like 5'-end
+# data. Measured on public data (benchmarks/README.md): 5'-end enriched
+# libraries 77-97%, the E. coli 5'-end control 42%, fragment (random-primed)
+# libraries 22-26%.
+QC_MIN_PEAK_SHARE = {"enriched": 0.50, "control": 0.30}
+# Minimum share of read 5' ends inside genes that lie on the gene's strand.
+# 5'-end libraries: 66-96%; the antisense mate of a stranded library: 2%.
+QC_MIN_SENSE_SHARE = 0.30
+
+
+def peak_share(signal, window=20, fold=5.0, min_reads=2):
+    """Share of read 5' ends at sharp peaks.
+
+    A position is a peak if it has at least `min_reads` reads and at least
+    `fold` times the mean of the surrounding +-`window` nt (itself excluded).
+    In 5'-end libraries most reads start at TSS or processed ends; in fragment
+    libraries read starts are spread along transcripts.
+    """
+    total = peaks = 0.0
+    for positions in signal.values():
+        if not positions:
+            continue
+        ordered = sorted(positions)
+        values = [positions[p] for p in ordered]
+        prefix = [0.0]
+        for v in values:
+            prefix.append(prefix[-1] + v)
+        lo = hi = 0
+        for i, pos in enumerate(ordered):
+            while ordered[lo] < pos - window:
+                lo += 1
+            while hi < len(ordered) and ordered[hi] <= pos + window:
+                hi += 1
+            neighbours = (prefix[hi] - prefix[lo] - values[i]) / (2.0 * window)
+            total += values[i]
+            if values[i] >= min_reads and values[i] >= fold * max(neighbours, 1.0 / (2 * window)):
+                peaks += values[i]
+    return peaks / total if total else float("nan")
+
+
+def sense_share(signal, genes):
+    """Share of read 5' ends inside genes that are on the gene's strand."""
+    index = GeneIndex(genes)
+    sense = anti = 0.0
+    for (seqid, strand), positions in signal.items():
+        for pos, value in positions.items():
+            hits = index.overlapping(seqid, pos, pos)
+            if not hits:
+                continue
+            if any(g.strand == strand for g in hits):
+                sense += value
+            else:
+                anti += value
+    return sense / (sense + anti) if sense + anti else float("nan")
+
+
+def library_qc(signal, genes=None):
+    """Summary statistics used to check that a library is 5'-end data."""
+    reads = total_signal(signal)
+    return {"reads": reads,
+            "positions": sum(len(v) for v in signal.values()),
+            "peak_share": peak_share(signal),
+            "sense_share": sense_share(signal, genes) if genes else float("nan")}
+
+
+def qc_warnings(qc, role):
+    """Plain-language warnings for one library ('enriched' or 'control')."""
+    warnings = []
+    if qc["reads"] == 0:
+        return ["no reads were counted (check --mate, --min-mapq and sequence names)"]
+    if qc["peak_share"] == qc["peak_share"] and qc["peak_share"] < QC_MIN_PEAK_SHARE[role]:
+        warnings.append(
+            "only %.0f%% of reads start at sharp peaks (expected at least %.0f%% for a "
+            "5'-end %s library); this looks like fragment (random-primed) RNA-seq, where "
+            "read starts do not mark TSS" % (100 * qc["peak_share"],
+                                             100 * QC_MIN_PEAK_SHARE[role], role))
+    if qc["sense_share"] == qc["sense_share"] and qc["sense_share"] < QC_MIN_SENSE_SHARE:
+        warnings.append(
+            "only %.0f%% of reads inside genes are on the gene's strand; the counted read "
+            "is probably antisense (try the other mate with --mate, or check the library "
+            "strandedness)" % (100 * qc["sense_share"]))
+    return warnings
+
+
+def run_qc(paths, signals, roles, genes=None, out_path=None, stream=sys.stderr):
+    """Check every library, print a table and warnings, optionally write a TSV.
+
+    Returns the number of libraries with warnings.
+    """
+    rows, flagged = [], 0
+    for path, signal, role in zip(paths, signals, roles):
+        qc = library_qc(signal, genes)
+        warnings = qc_warnings(qc, role)
+        flagged += bool(warnings)
+        rows.append((path, role, qc, warnings))
+    stream.write("Library check (5'-end data expected):\n")
+    stream.write("  %-8s %12s %10s %8s %8s  %s\n" % ("role", "reads", "positions", "peaks",
+                                                     "sense", "library"))
+    for path, role, qc, warnings in rows:
+        stream.write("  %-8s %12.0f %10d %7.1f%% %7s  %s\n" % (
+            role, qc["reads"], qc["positions"], 100 * qc["peak_share"],
+            "NA" if qc["sense_share"] != qc["sense_share"] else "%.1f%%" % (100 * qc["sense_share"]),
+            path))
+        for w in warnings:
+            stream.write("  WARNING (%s): %s\n" % (os.path.basename(path), w))
+    if out_path:
+        with open(out_path, "w") as out:
+            out.write("library\trole\treads\tpositions\tpeak_share\tsense_share\twarnings\n")
+            for path, role, qc, warnings in rows:
+                out.write("%s\t%s\t%.0f\t%d\t%s\t%s\t%s\n" % (
+                    path, role, qc["reads"], qc["positions"], _fmt(qc["peak_share"]),
+                    _fmt(qc["sense_share"]), "; ".join(warnings) or "none"))
+    return flagged
+
+
+# ---------------------------------------------------------------------------
 # Command line
 # ---------------------------------------------------------------------------
 
@@ -761,7 +880,17 @@ def build_parser():
     call.add_argument("--antisense-distance", type=int, default=100,
                       help="Antisense window either side of a gene (default 100)")
     call.add_argument("--out-prefix", required=True,
-                      help="Writes <prefix>.gff and <prefix>.tsv")
+                      help="Writes <prefix>.gff, <prefix>.tsv and <prefix>.qc.tsv")
+    call.add_argument("--strict-qc", action="store_true",
+                      help="Stop if a library fails the 5'-end data check "
+                           "(default: warn and continue)")
+
+    qc = sub.add_parser("qc", help="Check that libraries look like 5'-end data")
+    add_inputs(qc)
+    qc.add_argument("--annotation", help="GFF3 annotation (adds the strand check)")
+    qc.add_argument("--feature-types", default="CDS",
+                    help="GFF feature types used as genes (default: CDS)")
+    qc.add_argument("--out", help="Write the checks to this TSV")
 
     export = sub.add_parser(
         "annogesic-libs",
@@ -824,6 +953,15 @@ def main(argv=None):
                         seqid, strand, pos, "NA" if offset is None else offset))
         return 0
 
+    if args.command == "qc":
+        genes = (read_genes(args.annotation, tuple(args.feature_types.split(",")))
+                 if args.annotation else None)
+        paths = args.enriched + args.control
+        signals = [load_library(p, args.mate, args.min_mapq) for p in paths]
+        roles = ["enriched"] * len(args.enriched) + ["control"] * len(args.control)
+        flagged = run_qc(paths, signals, roles, genes, args.out, stream=sys.stdout)
+        return 2 if flagged else 0
+
     settings = dict(PRESETS[args.preset])
     for name in settings:
         value = getattr(args, name, None)
@@ -832,6 +970,18 @@ def main(argv=None):
 
     enriched = [load_library(p, args.mate, args.min_mapq) for p in args.enriched]
     controls = [load_library(p, args.mate, args.min_mapq) for p in args.control]
+    genes = (read_genes(args.annotation, tuple(args.feature_types.split(",")))
+             if args.annotation else None)
+    out_dir = os.path.dirname(args.out_prefix)
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True)
+    flagged = run_qc(args.enriched + args.control, enriched + controls,
+                     ["enriched"] * len(enriched) + ["control"] * len(controls),
+                     genes, args.out_prefix + ".qc.tsv")
+    if flagged and args.strict_qc:
+        sys.stderr.write("Stopping: %d librar%s failed the check (--strict-qc).\n"
+                         % (flagged, "y" if flagged == 1 else "ies"))
+        return 2
     calls = call_positions(enriched, controls, min_rpm=settings["min_rpm"],
                            min_log2fc=settings["min_log2fc"],
                            min_replicates=args.min_replicates,
@@ -839,12 +989,8 @@ def main(argv=None):
                            control_floor=settings["control_floor"],
                            rpm_decimals=settings["rpm_decimals"])
     calls = cluster_tss(calls, settings["cluster_distance"])
-    if args.annotation:
-        genes = read_genes(args.annotation, tuple(args.feature_types.split(",")))
+    if genes is not None:
         classify(calls, genes, args.utr_length, args.antisense_distance)
-    out_dir = os.path.dirname(args.out_prefix)
-    if out_dir:
-        os.makedirs(out_dir, exist_ok=True)
     write_gff(calls, args.out_prefix + ".gff")
     write_table(calls, args.out_prefix + ".tsv")
     print(summarise(calls))

@@ -106,6 +106,29 @@ Input notes:
   `--control` can be left out; then only the RPM cut-off applies, which is
   much less specific because processed RNA ends are not filtered out.
 
+### `qc`: check that libraries are 5'-end data
+
+`call` only makes sense for libraries in which each read starts at an RNA 5'
+end (5'-adapter ligation, as in the original Cappable-seq protocol). Some
+"Cappable-seq" data are random-primed, fragmented RNA-seq of the captured
+RNA, where read starts do not mark TSS. `qc` reports for each library:
+
+* the share of reads that start at sharp peaks (≥ 2 reads and ≥ 5 times the
+  mean of the surrounding ±20 nt). On public data, 5'-end enriched libraries
+  score 77–97% and fragment libraries 22–27%; a warning is given below 50%
+  for enriched libraries and below 30% for controls (which are less peaked);
+* with `--annotation`, the share of reads inside genes on the gene's strand;
+  below 30% usually means the wrong mate of a paired library is counted.
+
+```bash
+python cappable_tss.py qc --enriched rep1.bam rep2.bam --control ctl.bam \
+    --annotation genome.gff --out qc.tsv
+```
+
+`qc` exits with status 2 if any library is flagged. `call` runs the same
+checks, prints them, writes `<prefix>.qc.tsv` and continues; add
+`--strict-qc` to stop instead.
+
 ### `annogesic-libs`: prepare Cappable-seq data for ANNOgesic
 
 Use this if you want to stay inside the ANNOgesic workflow, for example to
