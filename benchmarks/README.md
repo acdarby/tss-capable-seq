@@ -14,6 +14,7 @@ Tools to judge TSS-calling methods on real and simulated Cappable-seq data
 | `promoter_model.py` | Genome-trained promoter score: recognition, rescue at low depth, learned weights |
 | `shoulders.py` | Calls in the downstream shoulder of a stronger TSS: evidence for removed and kept calls |
 | `standard_mode.py` | Validates the standard mode and its confidence tiers |
+| `mixture/` | Two bacteria in one sample: *E. coli* mixed into *Salmonella* at 100, 10 and 2%, against each called alone |
 | `design.py` | Design comparisons (replicates against one library, depth, control) for `docs/design_recommendations.md` |
 | `ettwiller2016/` | Rebuilds the *E. coli* data and compares with the published TSS table |
 | `frontiers2026/` | TSSpredator and ANNOgesic on wAlbB fragment-library data |
@@ -503,3 +504,38 @@ because the 1.5-RPM cut-off already implies ≥ 10 reads there. Without
 rate, 351 medium, 8,366 low), so `--genome` is recommended. "Low" is
 relative: in the replicated datasets most low-confidence TSS are still
 confirmed by deeper data.
+
+## Several bacteria in one sample (multi-genome branch, October 2026)
+
+`call --genome A.fa B.fa ...` splits each library by organism and calls each
+separately. Test (`mixture/`, `results/mixture_ecoli_salmonella.tsv`):
+*E. coli* reads mixed into two *Salmonella* replicates at 100%, 10% and 2%
+of its reads, mapped to both genomes together, against each organism's same
+reads mapped to its own genome and called alone. *Recovered*: share of the
+TSS called alone that the mixture also calls (± 2 nt); *also alone*: share
+of the mixture's TSS that were also called alone.
+
+| *E. coli* share | MAPQ | *E. coli* reads, mixed / alone | *E. coli* TSS, mixed / alone | Recovered | Also alone | High-confidence also alone |
+|---|---|---|---|---|---|---|
+| 2% | 20 | 325,179 / 361,339 | 5,176 / 5,307 | 96.6% | 99.1% | 99.9% |
+| 2% | 0 | 810,739 / 361,339 | 5,781 / 5,307 | 99.0% | 90.9% | 91.2% |
+| 10% | 20 | 1.63 M / 1.81 M | 15,365 / 15,611 | 97.5% | 99.0% | 99.9% |
+| 10% | 0 | 2.29 M / 1.81 M | 16,149 / 15,611 | 99.1% | 95.8% | 96.3% |
+| 100% | 20 | 16.3 M / 18.1 M | 68,281 / 68,717 | 98.4% | 99.0% | 99.6% |
+
+*Salmonella* (the abundant organism) at MAPQ 20: 98.3% recovered, 99.7%
+also called alone, in every mixture.
+
+* At MAPQ 20 the rare organism's calls are almost unchanged by the
+  abundant one: with *E. coli* at 2%, 99.9% of its high-confidence TSS were
+  also called alone.
+* Without the filter (MAPQ 0), the abundant organism's reads leak into the
+  rare one: *E. coli* at 2% gains about 450,000 reads, more than its own,
+  and 526 calls not made alone (9%), 46% of them within 50 nt of rRNA or
+  tRNA genes (0.4% of normal calls) and 139 rated high confidence. At
+  MAPQ 20 there are 48 such calls (1 high).
+* The filter costs about 10% of reads (those that fit both genomes) and
+  2–3% of TSS, mostly in conserved regions.
+
+So: map to all genomes and the host together, use `--min-mapq 20` (the tool
+warns below 10), and call each organism separately.
