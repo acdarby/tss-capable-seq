@@ -82,6 +82,35 @@ preferred). Resequencing one library adds depth but not a replicate:
 artefacts made in that library, such as PCR-duplicate stacks, repeat in it.
 How to design the experiment: `docs/design_recommendations.md`.
 
+#### Samples with several bacteria (`--genome` with several files)
+
+For samples that contain more than one bacterium, such as an insect with a
+primary and secondary symbionts, give one FASTA file per organism
+(`NAME=file.fa` sets the name) and their annotations:
+
+```bash
+python cappable_tss.py call \
+    --enriched rep1.bam rep2.bam rep3.bam \
+    --genome Buchnera=buchnera.fa Serratia=serratia.fa \
+    --annotation buchnera.gff serratia.gff --feature-types CDS \
+    --min-mapq 20 --out-prefix results/TSS
+```
+
+* Map the reads to all genomes and the host together, then filter on
+  mapping quality (`--min-mapq 20`): reads that fit two genomes equally
+  well (rRNA, tRNA and other conserved genes) then get a low mapping
+  quality and are dropped. The tool warns if `--min-mapq` is below 10.
+* Each library is split by the sequences its reads map to. Reads on other
+  sequences (the host, unlisted genomes) are counted and set aside.
+* Every step runs separately for each organism: the library check
+  (`<prefix>.<NAME>.qc.tsv`), normalisation, the choice of method, the
+  promoter model and the confidence. A rare organism is therefore not
+  judged against the reads of an abundant one.
+* The output has an `organism` column, and `design.txt` a section per
+  organism with its read count. A genome with fewer than 2 million enriched
+  reads gets a warning that weak TSS will be missed.
+* This works in both modes.
+
 #### Development mode (`--mode dev`)
 
 With `--method cutoff` (the default in dev mode):
