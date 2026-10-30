@@ -651,5 +651,62 @@ class StandardModeTests(unittest.TestCase):
             self.assertEqual(sorted((r[2], r[1], r[-1]) for r in rows),
                              [("+", "500", "high"), ("-", "900", "high")])
 
+
+class MultiGenomeTests(unittest.TestCase):
+    def sample(self, tmp, rep):
+        # Abundant organism A (seq a1), rare organism B (seq b1), host reads on h1.
+        text = bed_reads("a1", 500, "+", 400) + bed_reads("a1", 900, "-", 200)
+        text += "".join(bed_reads("a1", p, "+", 1) for p in range(100, 1000, 23))
+        text += bed_reads("b1", 300, "+", 20) + bed_reads("b1", 700, "-", 12)
+        text += "".join(bed_reads("b1", p, "+", 1) for p in range(100, 1000, 97))
+        text += bed_reads("h1", 400, "+", 300)
+        return write(tmp, "rep%d.bed" % rep, text)
+
+    def test_split_signal(self):
+        sig = {("a1", "+"): {1: 2.0}, ("b1", "-"): {5: 3.0}, ("h1", "+"): {9: 7.0}}
+        parts, other = ct.split_signal(sig, {"A": {"a1"}, "B": {"b1"}})
+        self.assertEqual(dict(parts["A"]), {("a1", "+"): {1: 2.0}})
+        self.assertEqual(dict(parts["B"]), {("b1", "-"): {5: 3.0}})
+        self.assertEqual(other, 7.0)
+
+    def test_parse_genomes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            a = write(tmp, "orgA.fa", ">a1\nACGT\n")
+            b = write(tmp, "b.fasta", ">b1\nGG\n")
+            got = ct.parse_genomes([a, "Bee=" + b])
+            self.assertEqual(got, [("orgA", {"a1": "ACGT"}), ("Bee", {"b1": "GG"})])
+
+    def test_call_per_organism(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            beds = [self.sample(tmp, r) for r in range(2)]
+            import random
+            rng = random.Random(1)
+            fa = write(tmp, "A.fa", ">a1\n" + "".join(rng.choice("ACGT") for _ in range(1200)) + "\n")
+            fb = write(tmp, "B.fa", ">b1\n" + "".join(rng.choice("ACGT") for _ in range(1200)) + "\n")
+            prefix = os.path.join(tmp, "out", "TSS")
+            self.assertEqual(ct.main(["call", "--enriched"] + beds + ["--genome", fa, fb,
+                                      "--min-mapq", "20", "--out-prefix", prefix]), 0)
+            with open(prefix + ".tsv") as handle:
+                header, *rows = [r.split("\t") for r in handle.read().splitlines()]
+            self.assertEqual(header[-1], "organism")
+            got = sorted((r[-1], r[0], r[2], r[1]) for r in rows)
+            self.assertEqual(got, [("A", "a1", "+", "500"), ("A", "a1", "-", "900"),
+                                   ("B", "b1", "+", "300"), ("B", "b1", "-", "700")])
+            with open(prefix + ".design.txt") as handle:
+                text = handle.read()
+            self.assertIn("[A]", text)
+            self.assertIn("[B]", text)
+            self.assertTrue(os.path.exists(prefix + ".A.qc.tsv"))
+            # Each organism is normalised on its own reads: B's TSS have high RPM.
+            rpm = {(r[-1], r[1]): float(r[6]) for r in rows}
+            self.assertGreater(rpm[("B", "300")], 1e5)
+            # Dev mode splits too.
+            self.assertEqual(ct.main(["call", "--mode", "dev", "--method", "local",
+                                      "--enriched"] + beds + ["--genome", fa, fb,
+                                      "--out-prefix", prefix + "dev"]), 0)
+            with open(prefix + "dev.tsv") as handle:
+                orgs = {r.split("\t")[-1] for r in handle.read().splitlines()[1:]}
+            self.assertEqual(orgs, {"A", "B"})
+
 if __name__ == "__main__":
     unittest.main()

@@ -202,6 +202,7 @@ class TSS(object):
         self.peak_ratio = float("nan")      # RPM / strongest call upstream (mark_shoulders)
         self.reads = float("nan")           # 5'-end reads, summed over replicates
         self.confidence = ""                # standard mode: high, medium or low
+        self.organism = ""                  # with several genomes: which one
         self.classes = set()
         self.genes = defaultdict(list)     # class -> [(gene name, UTR length)]
 
@@ -1046,21 +1047,6 @@ def choose_design(n_enriched, n_control):
     return design, reasons
 
 
-def write_design(path, design, reasons, qc_flagged, extras):
-    with open(path, "w") as out:
-        out.write("Standard mode\n")
-        out.write("method: %s\n" % ", ".join("%s=%s" % kv for kv in sorted(design.items())))
-        for line in reasons + extras:
-            out.write("- %s\n" % line)
-        if qc_flagged:
-            out.write("- library check: %d librar%s flagged (see .qc.tsv)\n"
-                      % (qc_flagged, "y" if qc_flagged == 1 else "ies"))
-        out.write("confidence: high = >= %d reads, positive promoter score (with --genome), "
-                  "consistent replicates, not a shoulder (peak_ratio >= %g); medium = reads "
-                  "or promoter, and consistent; low = the rest\n"
-                  % (CONFIDENT_READS, SHOULDER_RATIO))
-
-
 # ---------------------------------------------------------------------------
 # Annotation and classification
 # ---------------------------------------------------------------------------
@@ -1245,16 +1231,18 @@ def write_gff(tss_list, path, source="ANNOgesic-Cappable"):
                 attrs.append("reads=%d" % round(tss.reads))
             if tss.confidence:
                 attrs.append("confidence=%s" % tss.confidence)
+            if tss.organism:
+                attrs.append("organism=%s" % tss.organism)
             out.write("\t".join([tss.seqid, source, "TSS", str(tss.pos),
                                  str(tss.pos), _fmt(tss.enriched_rpm),
                                  tss.strand, ".", ";".join(attrs)]) + "\n")
 
 
-def write_table(tss_list, path):
+def write_table(tss_list, path, organism=False):
     header = ["seqid", "position", "strand", "type", "associated_gene",
               "UTR_length", "enriched_rpm", "control_rpm", "log2_enrichment",
               "replicates", "pvalue", "qvalue", "consistency_p", "promoter_score",
-              "peak_ratio", "reads", "confidence"]
+              "peak_ratio", "reads", "confidence"] + (["organism"] if organism else [])
     with open(path, "w") as out:
         out.write("\t".join(header) + "\n")
         for tss in tss_list:
@@ -1266,7 +1254,7 @@ def write_table(tss_list, path):
                 _fmt(tss.promoter_score), _fmt(tss.peak_ratio),
                 "NA" if tss.reads != tss.reads else "%d" % round(tss.reads),
                 tss.confidence or "NA",
-            ]) + "\n")
+            ] + ([tss.organism] if organism else [])) + "\n")
 
 
 def summarise(tss_list):
@@ -1626,17 +1614,22 @@ def build_parser():
 
     call = sub.add_parser("call", help="Call and classify TSS")
     add_inputs(call)
-    call.add_argument("--annotation", help="GFF3 genome annotation")
+    call.add_argument("--annotation", nargs="+",
+                      help="GFF3 genome annotation(s); with several organisms, give one "
+                           "per organism (features are matched by sequence name)")
     call.add_argument("--shoulder-ratio", type=float, default=0.0,
                       help="[dev] Drop a TSS with less than this share of the RPM of a "
                            "stronger TSS on the same strand within --shoulder-window nt "
                            "upstream (its downstream shoulder); 0 keeps all (default 0)")
     call.add_argument("--shoulder-window", type=int, default=30,
                       help="[dev] Window for --shoulder-ratio, nt upstream (default 30)")
-    call.add_argument("--genome",
+    call.add_argument("--genome", nargs="+",
                       help="Genome FASTA: adds a promoter score per TSS from a sequence "
                            "model trained on this genome's strongest TSS (-60..-1, "
-                           "cross-validated by 50-kb genome blocks)")
+                           "cross-validated by 50-kb genome blocks). Several FASTA files "
+                           "(one per organism, optionally NAME=file.fa) call each organism "
+                           "separately: reads are split by the sequences they map to, and "
+                           "reads on other sequences (e.g. the host) are set aside")
     call.add_argument("--feature-types", default="gene",
                       help="Comma-separated GFF feature types used as genes "
                            "(default: gene; CDS is a common alternative)")
@@ -1790,43 +1783,217 @@ def standard_calls(enriched, controls, exclude=None, genome=None, stream=None):
     return calls, design, reasons, extras
 
 
-def _call_standard(args):
-    """`call --mode standard`: method and settings from the design."""
+MIN_ORGANISM_READS = 2e6   # below this, warn that weak TSS will be missed
+
+
+def read_annotations(paths, feature_types):
+    genes = []
+    for path in paths or ():
+        genes += read_genes(path, feature_types)
+    return genes
+
+
+def parse_genomes(specs):
+    """[(organism, {seqid: sequence})] from FASTA paths, each optionally NAME=path."""
+    organisms = []
+    for spec in specs or ():
+        name, path = spec.split("=", 1) if "=" in spec and not os.path.exists(spec) else (None, spec)
+        if name is None:
+            name = os.path.basename(path)
+            for ext in (".gz", ".fasta", ".fna", ".fa"):
+                if name.endswith(ext):
+                    name = name[:-len(ext)]
+        organisms.append((name, read_fasta(path)))
+    return organisms
+
+
+def split_signal(signal, groups):
+    """{group: sub-signal} for {group: set of seqids}, and the reads left over."""
+    parts = {name: new_signal() for name in groups}
+    owner = {seqid: name for name, seqids in groups.items() for seqid in seqids}
+    other = 0.0
+    for (seqid, strand), positions in signal.items():
+        name = owner.get(seqid)
+        if name is None:
+            other += sum(positions.values())
+        else:
+            parts[name][(seqid, strand)] = positions
+    return parts, other
+
+
+def _dev_calls(args, enriched, controls, settings, exclude):
+    """Calls with the method and settings chosen in dev mode (None on error)."""
+    min_replicates = args.min_replicates
+    if args.method == "local":
+        if len(enriched) < 2:
+            sys.stderr.write("Warning: --method local with one library cannot require reads "
+                             "in several replicates; isolated read stacks (e.g. PCR "
+                             "duplicates) are then called and the FDR is too optimistic\n")
+        calls = call_local(enriched, controls or None, fdr=args.fdr, min_reads=args.min_reads,
+                           min_replicates=min_replicates or 1,
+                           window=args.window, gap=args.gap, trim=args.trim,
+                           dispersion=args.local_dispersion, exclude=exclude)
+    elif args.method == "binomial":
+        if len(controls) != len(enriched):
+            sys.stderr.write("--method binomial needs one --control per --enriched library\n")
+            return None
+        if args.dispersion == "auto":
+            dispersion = estimate_dispersion(enriched)
+            source = "estimated from replicates"
+            if dispersion is None:
+                dispersion, source = DEFAULT_DISPERSION, "default (one replicate)"
+        else:
+            dispersion, source = float(args.dispersion), "given"
+        sys.stderr.write("Dispersion %.4f (%s)\n" % (dispersion, source))
+        calls = call_binomial(enriched, controls, fdr=args.fdr, min_fold=args.min_fold,
+                              min_reads=args.min_reads, dispersion=dispersion,
+                              min_replicates=min_replicates or len(enriched),
+                              exclude=exclude)
+    else:
+        calls = call_positions(enriched, controls, min_rpm=settings["min_rpm"],
+                               min_log2fc=settings["min_log2fc"],
+                               min_replicates=min_replicates or 1,
+                               pseudocount=settings["pseudocount"],
+                               control_floor=settings["control_floor"],
+                               rpm_decimals=settings["rpm_decimals"])
+    calls = cluster_tss(calls, settings["cluster_distance"])
+    mark_shoulders(calls, args.shoulder_window)
+    if args.shoulder_ratio > 0:
+        before = len(calls)
+        calls = [t for t in calls if t.peak_ratio >= args.shoulder_ratio]
+        sys.stderr.write("Shoulders removed: %d\n" % (before - len(calls)))
+    return calls
+
+
+def _call(args, settings):
+    """`call` in either mode, for one organism or for each of several."""
+    standard = args.mode == "standard"
     enriched = [load_library(p, args.mate, args.min_mapq) for p in args.enriched]
     controls = [load_library(p, args.mate, args.min_mapq) for p in args.control]
-    genes = (read_genes(args.annotation, tuple(args.feature_types.split(",")))
+    genes = (read_annotations(args.annotation, tuple(args.feature_types.split(",")))
              if args.annotation else None)
+    rna = (GeneIndex(read_annotations(args.annotation, ("rRNA", "tRNA")))
+           if args.annotation else None)
     out_dir = os.path.dirname(args.out_prefix)
     if out_dir:
         os.makedirs(out_dir, exist_ok=True)
-    roles = ["enriched"] * len(enriched) + ["control"] * len(controls)
-    flagged = run_qc(args.enriched + args.control, enriched + controls, roles, genes,
-                     args.out_prefix + ".qc.tsv")
-    enriched_flagged = sum(1 for sig in enriched if qc_warnings(library_qc(sig, genes), "enriched"))
-    if enriched_flagged:
-        sys.stderr.write("Stopping: %d enriched librar%s do not look like 5'-end data, so "
-                         "read starts do not mark TSS (see the check above). Use --mode dev "
-                         "to call anyway.\n" % (enriched_flagged,
-                                                 "y" if enriched_flagged == 1 else "ies"))
-        return 2
-    exclude = (GeneIndex(read_genes(args.annotation, ("rRNA", "tRNA")))
-               if args.annotation else None)
-    genome = read_fasta(args.genome) if args.genome else None
-    calls, design, reasons, extras = standard_calls(enriched, controls, exclude, genome,
-                                                    stream=sys.stderr)
+    organisms = parse_genomes(args.genome)
+    multi = len(organisms) > 1
+    if multi:
+        names = [name for name, _ in organisms]
+        if len(set(names)) != len(names):
+            sys.stderr.write("Give each --genome a different name (NAME=file.fa)\n")
+            return 1
+        groups = {name: set(seqs) for name, seqs in organisms}
+        split_e = [split_signal(lib, groups) for lib in enriched]
+        split_c = [split_signal(lib, groups) for lib in controls]
+        other = sum(o for _, o in split_e)
+        total = sum(total_signal(lib) for lib in enriched) or 1.0
+        sys.stderr.write("Enriched reads on none of the genomes (host or other sequences): "
+                         "%.0f (%.1f%%)\n" % (other, 100.0 * other / total))
+        if args.min_mapq < 10:
+            sys.stderr.write("Warning: several genomes with --min-mapq %d; reads that map "
+                             "equally well to two genomes (e.g. rRNA, tRNA) are counted. "
+                             "Use --min-mapq 20 with reads mapped to all genomes and the "
+                             "host together\n" % args.min_mapq)
+        units = [(name, seqs, [parts[name] for parts, _ in split_e],
+                  [parts[name] for parts, _ in split_c]) for name, seqs in organisms]
+    else:
+        seqs = organisms[0][1] if organisms else None
+        units = [(organisms[0][0] if organisms else "", seqs, enriched, controls)]
+
+    all_calls, summary, flagged_total = [], [], 0
+    for name, seqs, libs, ctls in units:
+        label = (name + ": ") if multi else ""
+        paths = [label + p for p in args.enriched + args.control]
+        qc_path = args.out_prefix + (".%s.qc.tsv" % name if multi else ".qc.tsv")
+        if multi:
+            sys.stderr.write("== %s ==\n" % name)
+        flagged = run_qc(paths, libs + ctls, ["enriched"] * len(libs) + ["control"] * len(ctls),
+                         genes, qc_path)
+        flagged_total += flagged
+        reads = sum(total_signal(lib) for lib in libs)
+        notes = []
+        if multi and reads < MIN_ORGANISM_READS:
+            notes.append("only %.0f enriched reads on this genome: strong TSS are found, weak "
+                         "ones are missed (see docs/design_recommendations.md, depth)" % reads)
+        enriched_flagged = sum(1 for sig in libs
+                               if qc_warnings(library_qc(sig, genes), "enriched"))
+        if standard and enriched_flagged:
+            message = ("%d enriched librar%s do not look like 5'-end data for %s, so read "
+                       "starts do not mark TSS (see the check above). Use --mode dev to call "
+                       "anyway." % (enriched_flagged, "y" if enriched_flagged == 1 else "ies",
+                                    name or "this genome"))
+            if not multi:
+                sys.stderr.write("Stopping: " + message + "\n")
+                return 2
+            sys.stderr.write("Skipping %s: %s\n" % (name, message))
+            summary.append((name, None, ["skipped: " + message], notes, reads))
+            continue
+        if not standard and flagged and args.strict_qc:
+            sys.stderr.write("Stopping: %d librar%s failed the check (--strict-qc).\n"
+                             % (flagged, "y" if flagged == 1 else "ies"))
+            return 2
+        if standard:
+            calls, design, reasons, extras = standard_calls(libs, ctls, rna, seqs,
+                                                            stream=sys.stderr)
+        else:
+            exclude = rna if args.method in ("binomial", "local") and \
+                args.normalise == "exclude-rna" else None
+            if args.method in ("binomial", "local") and args.normalise == "exclude-rna" \
+                    and rna is None:
+                sys.stderr.write("No --annotation: library sizes include rRNA/tRNA reads\n")
+            calls = _dev_calls(args, libs, ctls, settings, exclude)
+            if calls is None:
+                return 1
+            if seqs is not None:
+                add_promoter_scores(calls, seqs, stream=sys.stderr)
+            design, reasons, extras = dict(method=args.method, preset=args.preset), [], []
+        for t in calls:
+            t.organism = name
+        all_calls += calls
+        summary.append((name, design, reasons + extras, notes, reads))
+        for line in reasons + extras + notes:
+            sys.stderr.write("Design%s: %s\n" % (" (%s)" % name if multi else "", line))
+
     if genes is not None:
-        classify(calls, genes, args.utr_length, args.antisense_distance)
-    for line in reasons + extras:
-        sys.stderr.write("Design: %s\n" % line)
-    write_design(args.out_prefix + ".design.txt", design, reasons, flagged, extras)
-    write_gff(calls, args.out_prefix + ".gff")
-    write_table(calls, args.out_prefix + ".tsv")
-    print(summarise(calls))
-    tiers = defaultdict(int)
-    for t in calls:
-        tiers[t.confidence] += 1
-    print("Confidence: " + ", ".join("%s %d" % (k, tiers[k]) for k in ("high", "medium", "low")))
+        classify(all_calls, genes, args.utr_length, args.antisense_distance)
+    if standard:
+        _write_design(args.out_prefix + ".design.txt", summary, flagged_total, multi)
+    write_gff(all_calls, args.out_prefix + ".gff")
+    write_table(all_calls, args.out_prefix + ".tsv", organism=multi)
+    for name, _, _, _, _ in summary:
+        part = [t for t in all_calls if t.organism == name]
+        if multi:
+            print("== %s ==" % name)
+        print(summarise(part))
+        if standard:
+            tiers = defaultdict(int)
+            for t in part:
+                tiers[t.confidence] += 1
+            print("Confidence: " + ", ".join("%s %d" % (k, tiers[k])
+                                             for k in ("high", "medium", "low")))
     return 0
+
+
+def _write_design(path, summary, qc_flagged, multi):
+    with open(path, "w") as out:
+        out.write("Standard mode\n")
+        for name, design, lines, notes, reads in summary:
+            if multi:
+                out.write("\n[%s] enriched reads on this genome: %.0f\n" % (name, reads))
+            if design:
+                out.write("method: %s\n"
+                          % ", ".join("%s=%s" % kv for kv in sorted(design.items())))
+            for line in lines + notes:
+                out.write("- %s\n" % line)
+        if qc_flagged:
+            out.write("\nlibrary check: %d librar%s flagged (see the .qc.tsv file%s)\n"
+                      % (qc_flagged, "y" if qc_flagged == 1 else "ies", "s" if multi else ""))
+        out.write("\nconfidence: high = >= %d reads, positive promoter score (with --genome), "
+                  "consistent replicates, not a shoulder (peak_ratio >= %g); medium = reads "
+                  "or promoter, and consistent; low = the rest\n"
+                  % (CONFIDENT_READS, SHOULDER_RATIO))
 
 
 def main(argv=None):
@@ -1874,7 +2041,7 @@ def main(argv=None):
             sys.stderr.write("%s: only in --mode dev (standard mode chooses the method and "
                              "settings from the design)\n" % ", ".join(given))
             return 1
-        return _call_standard(args)
+        return _call(args, None)
     if args.method is None:
         args.method = "cutoff"
     if args.preset is None:
@@ -1884,74 +2051,7 @@ def main(argv=None):
         value = getattr(args, name, None)
         if value is not None:
             settings[name] = value
-
-    enriched = [load_library(p, args.mate, args.min_mapq) for p in args.enriched]
-    controls = [load_library(p, args.mate, args.min_mapq) for p in args.control]
-    genes = (read_genes(args.annotation, tuple(args.feature_types.split(",")))
-             if args.annotation else None)
-    out_dir = os.path.dirname(args.out_prefix)
-    if out_dir:
-        os.makedirs(out_dir, exist_ok=True)
-    flagged = run_qc(args.enriched + args.control, enriched + controls,
-                     ["enriched"] * len(enriched) + ["control"] * len(controls),
-                     genes, args.out_prefix + ".qc.tsv")
-    if flagged and args.strict_qc:
-        sys.stderr.write("Stopping: %d librar%s failed the check (--strict-qc).\n"
-                         % (flagged, "y" if flagged == 1 else "ies"))
-        return 2
-    min_replicates = args.min_replicates
-    exclude = None
-    if args.method in ("binomial", "local") and args.normalise == "exclude-rna":
-        if args.annotation:
-            exclude = GeneIndex(read_genes(args.annotation, ("rRNA", "tRNA")))
-        else:
-            sys.stderr.write("No --annotation: library sizes include rRNA/tRNA reads\n")
-    if args.method == "local":
-        if len(enriched) < 2:
-            sys.stderr.write("Warning: --method local with one library cannot require reads "
-                             "in several replicates; isolated read stacks (e.g. PCR "
-                             "duplicates) are then called and the FDR is too optimistic\n")
-        calls = call_local(enriched, controls or None, fdr=args.fdr, min_reads=args.min_reads,
-                           min_replicates=min_replicates or 1,
-                           window=args.window, gap=args.gap, trim=args.trim,
-                           dispersion=args.local_dispersion, exclude=exclude)
-    elif args.method == "binomial":
-        if len(controls) != len(enriched):
-            sys.stderr.write("--method binomial needs one --control per --enriched library\n")
-            return 1
-        if args.dispersion == "auto":
-            dispersion = estimate_dispersion(enriched)
-            source = "estimated from replicates"
-            if dispersion is None:
-                dispersion, source = DEFAULT_DISPERSION, "default (one replicate)"
-        else:
-            dispersion, source = float(args.dispersion), "given"
-        sys.stderr.write("Dispersion %.4f (%s)\n" % (dispersion, source))
-        calls = call_binomial(enriched, controls, fdr=args.fdr, min_fold=args.min_fold,
-                              min_reads=args.min_reads, dispersion=dispersion,
-                              min_replicates=min_replicates or len(enriched),
-                              exclude=exclude)
-    else:
-        calls = call_positions(enriched, controls, min_rpm=settings["min_rpm"],
-                               min_log2fc=settings["min_log2fc"],
-                               min_replicates=min_replicates or 1,
-                               pseudocount=settings["pseudocount"],
-                               control_floor=settings["control_floor"],
-                               rpm_decimals=settings["rpm_decimals"])
-    calls = cluster_tss(calls, settings["cluster_distance"])
-    mark_shoulders(calls, args.shoulder_window)
-    if args.shoulder_ratio > 0:
-        before = len(calls)
-        calls = [t for t in calls if t.peak_ratio >= args.shoulder_ratio]
-        sys.stderr.write("Shoulders removed: %d\n" % (before - len(calls)))
-    if args.genome:
-        add_promoter_scores(calls, read_fasta(args.genome), stream=sys.stderr)
-    if genes is not None:
-        classify(calls, genes, args.utr_length, args.antisense_distance)
-    write_gff(calls, args.out_prefix + ".gff")
-    write_table(calls, args.out_prefix + ".tsv")
-    print(summarise(calls))
-    return 0
+    return _call(args, settings)
 
 
 if __name__ == "__main__":
